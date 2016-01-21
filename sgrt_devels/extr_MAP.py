@@ -38,8 +38,18 @@ def tile_to_raster(tile, dst):
     dataset.FlushCache()
 
 
-def extr_mean_sig0_map(dir_root, product_id, soft_id, product_name,
-                       src_res, maxlon, maxlat, minlon, minlat, workdir, outdir):
+def check_aoi_in_tile(grid, tile, ul, ur, ll, lr):
+    geotags = grid.get_tile_geotags(tile)
+    geotr = geotags['geotransform']
+
+    if ul[1] >= geotr[0] and ul[2] <= geotr[3] and lr[1] <= geotr[0]+100000 and lr[2] >= geotr[3]-100000:
+        return True
+    else:
+        return False
+
+
+def extr_mean_sig0_map(dir_root, product_id, soft_id, wflow_id, product_name,
+                       src_res, maxlon, maxlat, minlon, minlat, workdir, outdir, pol):
 
     #initialise grid
     alpGrid = Equi7.Equi7Grid(src_res)
@@ -58,6 +68,12 @@ def extr_mean_sig0_map(dir_root, product_id, soft_id, product_name,
     ag_tilelist = alpGrid.search_tiles(poly)
     print(ag_tilelist)
 
+    #get Equi7 coordinates
+    ulE7 = alpGrid.lonlat2equi7xy(minlon, maxlat)
+    urE7 = alpGrid.lonlat2equi7xy(maxlon, maxlat)
+    llE7 = alpGrid.lonlat2equi7xy(minlon, minlat)
+    lrE7 = alpGrid.lonlat2equi7xy(maxlon, minlat)
+
     # iterate through the tiles
     for i in range(len(ag_tilelist)):
     #for i in range(2,3):
@@ -68,34 +84,95 @@ def extr_mean_sig0_map(dir_root, product_id, soft_id, product_name,
         tileGeotags = alpGrid.get_tile_geotags(tName)
 
         # create temporary tile to fill with mean values
-        tmpMeanSig0 = np.zeros([8000,8000], dtype=np.float32)
+        tmpMeanSig0 = np.zeros([10000,10000], dtype=np.float32)
         tmpMeanSig0[:,:] = -9999
 
-        for k in range(0,8000,1000): #column
-            for l in range(0,8000,1000): #row
-                # read sig0 and lia
-                sig0ts = TOI.read_ts("SIG0_", k, l, xsize=1000, ysize=1000)
-                liats = TOI.read_ts("PLIA_", k, l, xsize=1000, ysize=1000)
+        # check if the area of interest fall in one tile
+        if check_aoi_in_tile(alpGrid, tName, ulE7, urE7, llE7, lrE7):
+            xsize = int((urE7[1] - ulE7[1])/10)
+            ysize = int((ulE7[2] - llE7[2])/10)
+            ulx = int((ulE7[1] - tileGeotags['geotransform'][0])/10)
+            uly = int((tileGeotags['geotransform'][3] - ulE7[2])/10)
+            sig0ts = TOI.read_ts("SIG0_",ulx, uly, xsize=xsize, ysize=ysize)
+            liats = TOI.read_ts("PLIA_", ulx, uly, xsize=xsize, ysize=ysize)
 
-                valT = (np.array([d.month for d in sig0ts[0]]) > 4) & (np.array([d.month for d in sig0ts[0]]) < 11)
-                valsig0 = np.array(sig0ts[1][valT,:,:])
-                vallia = np.array(liats[1][valT,:,:])
-                del sig0ts, liats
-                sig0mask = (valsig0 == -9999) | (vallia < 2000) | (vallia > 6000)
-                valsig0 = valsig0.astype(np.float32)
-                valsig0[sig0mask] = np.nan
+            #tmpMeanSig0 = np.zeros([ysize,xsize], dtype=np.float32)
+            #tmpMeanSig0[:,:] = -9999
 
-                tmp = np.nanmean(valsig0, axis=0)
-                tmp[np.isinf(tmp)] = -9999
-                tmpMeanSig0[l:l+1000,k:k+1000] = tmp
+            if pol is not None:
+                    if pol == "VH":
+                        sig0ts = (sig0ts[0][::2], np.array(sig0ts[1][::2,:,:]))
+                    elif pol == "VV":
+                        sig0ts = (sig0ts[0][1::2], np.array(sig0ts[1][1::2,:,:]))
 
-                del tmp, valT, valsig0, vallia, sig0mask
-                #
-                # for m in range(1000): #column
-                #     for n in range(1000): #row
-                #         valT = (np.array([d.month for d in sig0ts[0]]) > 4) & (np.array([d.month for d in sig0ts[0]]) < 11) & \
-                #                (sig0ts[1][:,n,m] != -9999) & (liats[1][:,n,m] > 2000) & (liats[1][:,n,m] < 6000)
-                #         tmpMeanSig0[l+n, k+m] = sig0ts[1][valT,n,m].mean()
+            #if for all dates lia and sig0 exist
+            dinds = []
+            for sigdate in sig0ts[0]:
+                if sigdate not in liats[0]:
+                    dinds = dinds + [sig0ts[0].index(sigdate)]
+            #for dind in dinds: del sig0ts[0][dind]
+            for dind in dinds:
+                tmpind = range(0,dind)+range(dind+1, len(sig0ts[1]))
+                sig0ts = ([sig0ts[0][i] for i in tmpind], np.array([sig0ts[1][i,:,:] for i in tmpind]))
+
+            # check for valid months (set to summer months for soil moisture retrieval)
+            valT = (np.array([d.month for d in sig0ts[0]]) > 4) & (np.array([d.month for d in sig0ts[0]]) < 11)
+            valsig0 = np.array(sig0ts[1][valT,:,:])
+            vallia = np.array(liats[1][valT,:,:])
+            del sig0ts, liats
+            sig0mask = (valsig0 == -9999) | (vallia < 2000) | (vallia > 6000)
+            valsig0 = valsig0.astype(np.float32)
+            valsig0[sig0mask] = np.nan
+            # calculate mean
+            tmp = np.nanmean(valsig0, axis=0)
+            tmp[np.isinf(tmp)] = -9999
+            tmpMeanSig0[uly:uly+ysize,ulx:ulx+xsize] = tmp
+            del tmp, valT, valsig0, vallia, sig0mask
+        else:
+            for k in range(0,10000,2500): #column
+                for l in range(0,10000,2500): #row
+                    # read sig0 and lia
+                    try:
+                        sig0ts = TOI.read_ts("SIG0_", k, l, xsize=2500, ysize=2500)
+                        liats = TOI.read_ts("PLIA_", k, l, xsize=2500, ysize=2500)
+                    except:
+                        continue
+
+                    if pol is not None:
+                        if pol == "VH":
+                            sig0ts = (sig0ts[0][::2], np.array(sig0ts[1][::2,:,:]))
+                        elif pol == "VV":
+                            sig0ts = (sig0ts[0][1::2], np.array(sig0ts[1][1::2,:,:]))
+
+                    #if for all dates lia and sig0 exist
+                    dinds = []
+                    for sigdate in sig0ts[0]:
+                        if sigdate not in liats[0]:
+                            dinds = dinds + [sig0ts[0].index(sigdate)]
+                    #for dind in dinds: del sig0ts[0][dind]
+                    for dind in dinds:
+                        tmpind = range(0,dind)+range(dind+1, len(sig0ts[1]))
+                        sig0ts = ([sig0ts[0][i] for i in tmpind], np.array([sig0ts[1][i,:,:] for i in tmpind]))
+
+                    valT = (np.array([d.month for d in sig0ts[0]]) > 4) & (np.array([d.month for d in sig0ts[0]]) < 11)
+                    valsig0 = np.array(sig0ts[1][valT,:,:])
+                    vallia = np.array(liats[1][valT,:,:])
+                    del sig0ts, liats
+                    sig0mask = (valsig0 == -9999) | (vallia < 2000) | (vallia > 6000)
+                    valsig0 = valsig0.astype(np.float32)
+                    valsig0[sig0mask] = np.nan
+
+                    tmp = np.nanmean(valsig0, axis=0)
+                    tmp[np.isinf(tmp)] = -9999
+                    tmpMeanSig0[l:l+2500,k:k+2500] = tmp
+
+                    del tmp, valT, valsig0, vallia, sig0mask
+                    #
+                    # for m in range(1000): #column
+                    #     for n in range(1000): #row
+                    #         valT = (np.array([d.month for d in sig0ts[0]]) > 4) & (np.array([d.month for d in sig0ts[0]]) < 11) & \
+                    #                (sig0ts[1][:,n,m] != -9999) & (liats[1][:,n,m] > 2000) & (liats[1][:,n,m] < 6000)
+                    #         tmpMeanSig0[l+n, k+m] = sig0ts[1][valT,n,m].mean()
 
         # save mean tile to work dir
         tmpOut = tmpMeanSig0.astype(dtype=np.int)
@@ -103,8 +180,8 @@ def extr_mean_sig0_map(dir_root, product_id, soft_id, product_name,
 
         driver = gdal.GetDriverByName('GTiff')
         dataset = driver.Create(outfile,
-                                8000,
-                                8000,
+                                10000,
+                                10000,
                                 1,
                                 gdal.GDT_Int16)
 
