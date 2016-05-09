@@ -70,28 +70,56 @@ def extr_ERA_SMC(path, lon, lat):
 
 
 # extract time series of SIG0 and LIA from SGRT database
-def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, lat):
+def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, lat, xdim, ydim, pol_name=None, grid=None):
     #initialise grid
     alpGrid = Equi7.Equi7Grid(src_res)
 
     #identify tile
-    Equi7XY = alpGrid.lonlat2equi7xy(lon, lat)
+    if grid is None:
+        Equi7XY = alpGrid.lonlat2equi7xy(lon, lat)
+    elif grid == 'Equi7':
+        Equi7XY = ['EU', lon, lat]
     TileName = alpGrid.identfy_tile(Equi7XY[0], [Equi7XY[1],Equi7XY[2]])
     TileExtent = Equi7.Equi7Tile(TileName).extent
     #load tile
     TOI = SgrtTile.SgrtTile(dir_root=dir_root, product_id=product_id, soft_id=soft_id, product_name=product_name, ftile=TileName, src_res=src_res)
-    #extract data
-    SIG0 = TOI.read_ts("SIG0_", int((Equi7XY[1]-TileExtent[0])/src_res), int((Equi7XY[2]-TileExtent[1])/src_res))
-    LIA = TOI.read_ts("PLIA_", int((Equi7XY[1]-TileExtent[0])/src_res), int((Equi7XY[2]-TileExtent[1])/src_res))
 
-    datelist = []
-    for i in range(len(SIG0[0])): datelist.append(int(SIG0[0][i].toordinal()))
+    # extract data
+    x = int((Equi7XY[1] - TileExtent[0]) / src_res)
+    y = int((TileExtent[3] - Equi7XY[2]) / src_res)
 
-    outtuple = (datelist, np.squeeze(SIG0[1]), np.squeeze(LIA[1]))
+    if pol_name is None:
+        SIG0 = TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim)
+        LIA = TOI.read_ts("PLIA_", x, y, xsize=xdim, ysize=ydim)
+    elif len(pol_name) == 1:
+        SIG0 = TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim, pol_name=pol_name.upper())
+        LIA = TOI.read_ts("PLIA_", x, y, xsize=xdim, ysize=ydim)
+    elif len(pol_name) == 2:
+        SIG0 = TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim, pol_name=pol_name[0].upper())
+        SIG02 =TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim, pol_name=pol_name[1].upper())
+        LIA = TOI.read_ts("PLIA_", x, y, xsize=xdim, ysize=ydim)
+    else:
+        return None
 
-    #TOI = None
+    # format datelists and check if all dates are available for both SIG0 and LIA.
+    datelistSIG = SIG0[0]
+    datelistLIA = LIA[0]
+    #for i in range(len(SIG0[0])): datelistSIG.append(int(SIG0[0][i].toordinal()))
+    #for i in range(len(LIA[0])): datelistLIA.append(int(LIA[0][i].toordinal()))
 
-    return(outtuple)
+    datelistFINAL = [x for x in datelistSIG if x in datelistLIA]
+    SIG0out = [SIG0[1][x,:,:] for x in range(len(SIG0[0])) if datelistSIG[x] in datelistFINAL]
+    LIAout = [LIA[1][x,:,:] for x in range(len(LIA[0])) if datelistLIA[x] in datelistFINAL]
+    if len(pol_name) == 1:
+        outtuple = (np.asarray(datelistFINAL), {'sig0': np.asarray(SIG0out), 'lia': np.asarray(LIAout)})
+    elif len(pol_name) == 2:
+        SIG0out2 = [SIG02[1][x,:,:] for x in range(len(SIG02[0])) if datelistSIG[x] in datelistFINAL]
+        outtuple = (np.asarray(datelistFINAL), {'sig0': np.asarray(SIG0out), 'sig02': np.asarray(SIG0out2), 'lia': np.asarray(LIAout)})
+
+    TOI = None
+
+    return outtuple
+
 
 
 #extract value of any given raster at band (band) at lat, lon
