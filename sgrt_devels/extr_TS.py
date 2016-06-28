@@ -70,7 +70,7 @@ def extr_ERA_SMC(path, lon, lat):
 
 
 # extract time series of SIG0 and LIA from SGRT database
-def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, lat, xdim, ydim, pol_name=None, grid=None):
+def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, lat, xdim, ydim, pol_name=None, grid=None, hour=None):
     #initialise grid
     alpGrid = Equi7.Equi7Grid(src_res)
 
@@ -88,35 +88,90 @@ def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, 
     x = int((Equi7XY[1] - TileExtent[0]) / src_res)
     y = int((TileExtent[3] - Equi7XY[2]) / src_res)
 
+    #extract data
     if pol_name is None:
         SIG0 = TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim)
         LIA = TOI.read_ts("PLIA_", x, y, xsize=xdim, ysize=ydim)
+
+        # check if date dublicates exist
+        udates = np.unique(SIG0[0], return_index=True)
+        days = np.array(SIG0[0])[udates[1]]
+        data = np.array(SIG0[1])[udates[1],:,:]
+        SIG0 = (days, data)
+        udates = np.unique(LIA[0], return_index=True)
+        days = np.array(LIA[0])[udates[1]]
+        data = np.array(LIA[1])[udates[1],:,:]
+        LIA = (days, data)
+
     elif len(pol_name) == 1:
         SIG0 = TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim, pol_name=pol_name.upper())
         LIA = TOI.read_ts("PLIA_", x, y, xsize=xdim, ysize=ydim)
+
+        # check if date dublicates exist
+        udates = np.unique(SIG0[0], return_index=True)
+        days = np.array(SIG0[0])[udates[1]]
+        data = np.array(SIG0[1])[udates[1],:,:]
+        SIG0 = (days, data)
+        udates = np.unique(LIA[0], return_index=True)
+        days = np.array(LIA[0])[udates[1]]
+        data = np.array(LIA[1])[udates[1],:,:]
+        LIA = (days, data)
+
     elif len(pol_name) == 2:
         SIG0 = TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim, pol_name=pol_name[0].upper())
-        SIG02 =TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim, pol_name=pol_name[1].upper())
-        LIA = TOI.read_ts("PLIA_", x, y, xsize=xdim, ysize=ydim)
+        SIG02 = TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim, pol_name=pol_name[1].upper())
+        LIA = TOI.read_ts("LIA__", x, y, xsize=xdim, ysize=ydim)
+
+        # this is temporary: filter scenes based on time, TODO: change or remove
+        if hour is not None:
+            morning = np.where(np.array([SIG0[0][i].hour for i in range(len(SIG0[0]))]) == hour)[0]
+            SIG0 = (np.array(SIG0[0])[morning], SIG0[1][morning])
+            morning = np.where(np.array([SIG02[0][i].hour for i in range(len(SIG02[0]))]) == hour)[0]
+            SIG02 = (np.array(SIG02[0])[morning], SIG02[1][morning])
+            morning = np.where(np.array([LIA[0][i].hour for i in range(len(LIA[0]))]) == hour)[0]
+            LIA = (np.array(LIA[0])[morning], LIA[1][morning])
+
+
+        # check if date dublicates exist
+        udates = np.unique(SIG0[0], return_index=True)
+        days = np.array(SIG0[0])[udates[1]]
+        data = np.array(SIG0[1])[udates[1],:,:]
+        SIG0 = (days, data)
+        udates = np.unique(SIG02[0], return_index=True)
+        days = np.array(SIG02[0])[udates[1]]
+        data = np.array(SIG02[1])[udates[1],:,:]
+        SIG02 = (days, data)
+        udates = np.unique(LIA[0], return_index=True)
+        days = np.array(LIA[0])[udates[1]]
+        data = np.array(LIA[1])[udates[1],:,:]
+        LIA = (days, data)
     else:
         return None
 
     # format datelists and check if all dates are available for both SIG0 and LIA.
+    # datelistSIG = []
+    # datelistLIA = []
+    # for i in range(len(SIG0[0])): datelistSIG.append(int(SIG0[0][i].toordinal()))
+    # for i in range(len(LIA[0])): datelistLIA.append(int(LIA[0][i].toordinal()))
     datelistSIG = SIG0[0]
-    datelistLIA = LIA[0]
-    #for i in range(len(SIG0[0])): datelistSIG.append(int(SIG0[0][i].toordinal()))
-    #for i in range(len(LIA[0])): datelistLIA.append(int(LIA[0][i].toordinal()))
+    if len(pol_name) == 2:
+        datelistSIG2 = SIG02[0]
+    else:
+        datelistSIG2 = SIG02[0]
 
-    datelistFINAL = [x for x in datelistSIG if x in datelistLIA]
+    datelistLIA = LIA[0]
+
+    datelistFINAL = [x for x in datelistSIG if (x in datelistLIA) and (x in datelistSIG2)]
+
     SIG0out = [SIG0[1][x,:,:] for x in range(len(SIG0[0])) if datelistSIG[x] in datelistFINAL]
     LIAout = [LIA[1][x,:,:] for x in range(len(LIA[0])) if datelistLIA[x] in datelistFINAL]
     if len(pol_name) == 1:
         outtuple = (np.asarray(datelistFINAL), {'sig0': np.asarray(SIG0out), 'lia': np.asarray(LIAout)})
     elif len(pol_name) == 2:
-        SIG0out2 = [SIG02[1][x,:,:] for x in range(len(SIG02[0])) if datelistSIG[x] in datelistFINAL]
+        SIG0out2 = [SIG02[1][x,:,:] for x in range(len(SIG02[0])) if datelistSIG2[x] in datelistFINAL]
         outtuple = (np.asarray(datelistFINAL), {'sig0': np.asarray(SIG0out), 'sig02': np.asarray(SIG0out2), 'lia': np.asarray(LIAout)})
 
-    TOI = None
+    #TOI = None
 
     return outtuple
 
