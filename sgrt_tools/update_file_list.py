@@ -79,7 +79,7 @@ def scihub2list(inpath, outpath):
         year = file[17:21]
         month = file[21:23]
         day = file[23:25]
-        pathlist.append("/eodc/pub/copernicus.eu/s1a_csar_grdh_iw/" + year + '/' + month + '/' + day + '/')
+        pathlist.append("/eodc/products/copernicus.eu/s1a_csar_grdh_iw/" + year + '/' + month + '/' + day + '/')
 
     # get the full file names
     filelist = list()

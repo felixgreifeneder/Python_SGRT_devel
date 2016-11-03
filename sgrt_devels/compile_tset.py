@@ -15,6 +15,7 @@ from sgrt.common.utils.SgrtTile import SgrtTile
 from osgeo import gdal, gdalconst
 from sklearn.svm import SVR
 from sklearn.grid_search import GridSearchCV
+from sklearn.grid_search import RandomizedSearchCV
 from sklearn.cross_validation import train_test_split
 from time import time
 
@@ -54,11 +55,11 @@ def stackh5(root_path=None, out_path=None):
 
 def dem2equi7(out_path=None, dem_path=None):
 
-    # this routine reproject the DEM to the Equi7 grid and derives slope and aspect
+    # this routine re-projects the DEM to the Equi7 grid and derives slope and aspect
 
     grid = Equi7Grid(10)
-    grid.resample(dem_path,out_path, gdal_path="/usr/local/bin", sgrid_ids=['EU'], e7_folder=False,
-                  outshortname="EDUDEM", withtilenameprefix=True, image_nodata=0, tile_nodata=-9999,
+    grid.resample(dem_path, out_path, gdal_path="/usr/local/bin", sgrid_ids=['EU'], e7_folder=False,
+                  outshortname="EDUDEM", withtilenameprefix=True, image_nodata=-32767, tile_nodata=-9999,
                   qlook_flag=False, resampling_type='bilinear')
 
     # get list of resampled DEM tiles
@@ -67,13 +68,16 @@ def dem2equi7(out_path=None, dem_path=None):
     # iterate through all files and derive slope and aspect
     for file in filelist:
 
-        # aspect
-        aspect_path = out_path + os.path.basename(file)[:-4] + '_aspect.tif'
-        # slope
-        slope_path = out_path + os.path.basename(file)[:-4] + '_slope.tif'
+        if (file.find('aspect') == -1) and (file.find('slope') == -1):
+            # aspect
+            aspect_path = out_path + os.path.basename(file)[:-4] + '_aspect.tif'
+            if not os.path.exists(aspect_path):
+                os.system('/usr/local/bin/gdaldem aspect ' + file + ' ' + aspect_path + ' -co "COMPRESS=LZW"')
 
-        os.system('/usr/local/bin/gdaldem slope ' + file + ' ' + slope_path + ' -co "COMPRESS=LZW"')
-        os.system('/usr/local/bin/gdaldem aspect ' + file + ' ' + aspect_path + ' -co "COMPRESS=LZW"')
+            # slope
+            slope_path = out_path + os.path.basename(file)[:-4] + '_slope.tif'
+            if not os.path.exists(slope_path):
+                os.system('/usr/local/bin/gdaldem slope ' + file + ' ' + slope_path + ' -co "COMPRESS=LZW"')
 
 
 class Trainingset(object):
@@ -92,7 +96,9 @@ class Trainingset(object):
         #
         # get list of available parameter tiles
         #tiles = os.listdir(sig0mpath)
-        tiles = ['E048N014T1', 'E048N015T1']
+        tiles = ['E051N015T1', 'E048N014T1', 'E045N014T1', 'E032N014T1', 'E034N008T1', 'E034N007T1', 'E049N016T1']
+        # portugal
+        #tiles = ['E032N014T1']
         extents = []
         for tname in tiles:
             tmptile = Equi7Tile('EU010M_' + tname)
@@ -100,25 +106,15 @@ class Trainingset(object):
             tmptile = None
 
         extents = np.array(extents)
-        if len(tiles) > 1:
-            aoi = [np.min(extents[:,0]), np.min(extents[:,1]), np.max(extents[:,2]), np.max(extents[:,3])]
-        else:
-            aoi = extents[0]
 
-        self.points = self.create_random_points(aoi=aoi)
+        # randomly generate points for the training set
+        self.points = self.create_random_points(aoi=extents)
 
-        tmpd1 = self.extr_sig0_lia(aoi, 5)
-        tmpd2 = self.extr_sig0_lia(aoi, 17)
-        #sig0lia = {}
-        dicts = [tmpd1, tmpd2]
-        # dicts = [tmpd2]
-
-        # merge dictionaries
-        tmpdm = { k: [d[k] for d in dicts] for k in dicts[0]}
-        sig0lia = {k: [item for sublist in tmpdm[k] for item in sublist] for k in tmpdm.keys()}
+        # extract parameters
+        sig0lia = self.extr_sig0_lia(extents)
 
         pickle.dump(sig0lia, open(self.outpath + 'sig0lia_dict.p', 'wb'))
-        # sig0lia = pickle.load(open(self.outpath + 'sig0lia_dict.p', 'rb'))
+        #sig0lia = pickle.load(open(self.outpath + 'sig0lia_dict.p', 'rb'))
 
         #temp filter swath
 
@@ -126,21 +122,22 @@ class Trainingset(object):
         # filter samples with nan values
         samples = np.array([sig0lia.get(x) for x in sig0lia.keys()])
         samples = samples.transpose()
-        #samples = samples[~np.isnan(samples).any(axis=1)]
         valid = ~np.isnan(samples).any(axis=1)
 
         # define training and validation sets
         self.target = np.array(sig0lia['ssm'])[valid]
-        self.features = np.vstack((np.array(sig0lia['sig0vv'])[valid],
-                                   np.array(sig0lia['sig0vh'])[valid],
-                                   # np.array(sig0lia['vv_sstd'])[valid],
-                                   # np.array(sig0lia['vh_sstd'])[valid],
-                                   np.array(sig0lia['lia'])[valid],
-                                   # np.array(sig0lia['lia_sstd'])[valid],
-                                   np.array(sig0lia['vv_tmean'])[valid],
-                                   np.array(sig0lia['vv_tstd'])[valid],
-                                   np.array(sig0lia['vh_tmean'])[valid],
-                                   np.array(sig0lia['vh_tstd'])[valid],#)).transpose()#
+        self.features = np.vstack(((np.array(sig0lia['sig0vv'])[valid]-np.array(sig0lia['vv_tmean'])[valid])/np.array(sig0lia['vv_tstd'])[valid],
+                                   (np.array(sig0lia['sig0vh'])[valid]-np.array(sig0lia['vh_tmean'])[valid])/np.array(sig0lia['vh_tstd'])[valid],
+                                   #np.array(sig0lia['vv_sstd'])[valid],
+                                   #np.array(sig0lia['vh_sstd'])[valid],
+                                   #np.array(sig0lia['lia'])[valid],
+                                   #np.array(sig0lia['lia_sstd'])[valid],
+                                   #np.array(sig0lia['vv_tmean'])[valid],
+                                   #np.array(sig0lia['vv_tstd'])[valid],
+                                   #np.array(sig0lia['vh_tmean'])[valid],
+                                   #np.array(sig0lia['vh_tstd'])[valid],
+                                   np.array(sig0lia['vv_slope'])[valid],
+                                   np.array(sig0lia['vh_slope'])[valid],#)).transpose()
                                    np.array(sig0lia['height'])[valid],
                                    np.array(sig0lia['aspect'])[valid],
                                    np.array(sig0lia['slope'])[valid])).transpose()
@@ -150,10 +147,7 @@ class Trainingset(object):
 
     def train_model(self):
 
-        from sklearn import ensemble
-        from sklearn import datasets
-        from sklearn.utils import shuffle
-        from sklearn.metrics import mean_squared_error
+        import scipy.stats
 
         # filter bad ssm values
         valid = np.where(self.target > 0)
@@ -169,29 +163,42 @@ class Trainingset(object):
         features = scaler.transform(self.features)
 
         # split into independent training data and test data
-        x_train, x_test, y_train, y_test = train_test_split(features, self.target, test_size=0.3, train_size=0.7)
+        x_train, x_test, y_train, y_test = train_test_split(features, self.target, test_size=0.3,
+                                                            train_size=0.7, random_state=0)
 
 
         # ...----...----...----...----...----...----...----...----...----...
         # SVR -- SVR -- SVR -- SVR -- SVR -- SVR -- SVR -- SVR -- SVR -- SVR
         # ---....---....---....---....---....---....---....---....---....---
 
-        dictCV = dict(C =       np.logspace(-2,2,10),
-                      gamma =   np.logspace(-2,1,10),
-                      epsilon = np.logspace(-2, -0.5, 10))
+        # dictCV = dict(C =       np.logspace(-2,2,10),
+        #               gamma =   np.logspace(-2,-0.5,10),
+        #               epsilon = np.logspace(-2, -0.5,10))
+        dictCV = dict(C=scipy.stats.expon(scale=100),
+                      gamma=scipy.stats.expon(scale=.1),
+                      epsilon=scipy.stats.expon(scale=.1),
+                      kernel=['rbf'])
 
         # specify kernel
-        svr_rbf = SVR(kernel = 'rbf')
+        # svr_rbf = SVR(kernel = 'rbf')
+        svr_rbf = SVR()
 
         # parameter tuning -> grid search
         start = time()
         print('Model training startet at: ' + str(start))
-        gdCV = GridSearchCV(estimator=svr_rbf, param_grid=dictCV, n_jobs=2, verbose=1, pre_dispatch='all')
+        # gdCV = GridSearchCV(estimator=svr_rbf, param_grid=dictCV1, n_jobs=2, verbose=1, pre_dispatch='all')
+        gdCV = RandomizedSearchCV(estimator=svr_rbf,
+                                  param_distributions=dictCV,
+                                  n_iter=200,
+                                  n_jobs=8,
+                                  pre_dispatch='all',
+                                  cv=5,
+                                  verbose=1)
         gdCV.fit(x_train, y_train)
         print('Elapse time for training: ' + str(time() - start))
-        pickle.dump((gdCV, scaler), open(self.outpath + 'mlmodel.p', 'wb'))
+        pickle.dump((gdCV.best_estimator_, scaler), open(self.outpath + 'mlmodel.p', 'wb'))
 
-        # prediction
+        # prediction on testset
         y_CV_rbf = gdCV.predict(x_test)
 
         r = np.corrcoef(y_test, y_CV_rbf)
@@ -204,17 +211,38 @@ class Trainingset(object):
         # create plots
         plt.figure(figsize = (6,6))
         plt.scatter(y_test, y_CV_rbf, c='g', label='True vs Est')
-        plt.xlim(0.1,0.5)
-        plt.ylim(0.1,0.5)
+        plt.xlim(0,0.5)
+        plt.ylim(0,0.5)
         plt.xlabel("SMAP L4 SMC [m3m-3]")
         plt.ylabel("Estimated SMC [m3m-3]")
-        plt.plot([0.1,0.5],[0.1,0.5], 'k--')
+        plt.plot([0,0.5],[0,0.5], 'k--')
         plt.savefig(self.outpath + 'truevsest.png')
+        plt.close()
+
+        # prediction on trainingset
+        y_CV_rbf = gdCV.predict(x_train)
+
+        r = np.corrcoef(y_train, y_CV_rbf)
+        error = np.sqrt(np.sum(np.square(y_train - y_CV_rbf)) / len(y_train))
+
+        print('SVR performance based on train-set')
+        print('R: ' + str(r[0, 1]))
+        print('RMSE. ' + str(error))
+
+        # create plots
+        plt.figure(figsize=(6, 6))
+        plt.scatter(y_train, y_CV_rbf, c='g', label='True vs Est')
+        plt.xlim(0, 0.5)
+        plt.ylim(0, 0.5)
+        plt.xlabel("SMAP L4 SMC [m3m-3]")
+        plt.ylabel("Estimated SMC [m3m-3]")
+        plt.plot([0, 0.5], [0, 0.5], 'k--')
+        plt.savefig(self.outpath + 'truevsest_training.png')
         plt.close()
 
 
 
-        return (gdCV, scaler)
+        return (gdCV.best_estimator_, scaler)
 
 
     def get_terrain(self, x, y):
@@ -256,7 +284,7 @@ class Trainingset(object):
         return (h[0,0], a[0,0], s[0,0])
 
 
-    def extr_sig0_lia(self, aoi, hour):
+    def extr_sig0_lia(self, aoi, hour=None):
 
         import sgrt_devels.extr_TS as exTS
         import random
@@ -268,6 +296,10 @@ class Trainingset(object):
             path = "168"
         elif hour == 17:
             path = "117"
+        else:
+            path = None
+
+        valLClist = [10,11,12,13,18,19,20,21,26,27,28,29,32]
 
         # cycle through all points
         for px in self.points:
@@ -276,7 +308,7 @@ class Trainingset(object):
             sig0points = set()
             cntr2 = 0
             broken = 0
-            while len(sig0points) <= 100:         # TODO: Increase number of subpoints
+            while len(sig0points) <= 25:         # TODO: Increase number of subpoints
                 if cntr2 >= 5000:
                     broken = 1
                     break
@@ -288,11 +320,12 @@ class Trainingset(object):
                 LCpx = self.get_lc(tmpx, tmpy)
 
                 # get mean
-                mean = self.get_sig0mean(tmpx,tmpy, path)
+                mean = self.get_sig0mean(tmpx, tmpy)
                 # mean = np.float32(mean)
                 # mean[mean != -9999] = mean[mean != -9999] / 100
 
-                if LCpx in [10, 12, 13, 18, 26, 29, 32] and mean[0] != -9999 and mean[1] != -9999 and tmpx >= aoi[0]+100 and tmpx <= aoi[2]-100 and tmpy >= aoi[1]+100 and tmpy <= aoi[3]-100:
+
+                if LCpx in valLClist and mean[0] != -9999 and mean[1] != -9999 and tmpx >= aoi[px[2]][0]+100 and tmpx <= aoi[px[2]][2]-100 and tmpy >= aoi[px[2]][1]+100 and tmpy <= aoi[px[2]][3]-100:
                     sig0points.add((tmpx, tmpy))
 
                 cntr2 = cntr2 + 1
@@ -319,25 +352,25 @@ class Trainingset(object):
             tsnum = 0
             for subpx in sig0points:
                 # get slope
-                # slope = self.get_slope(subpx[0],subpx[1])
+                slope = self.get_slope(subpx[0],subpx[1])
                 # slope = np.float32(slope)
                 # slope[slope != -9999] = slope[slope != -9999] / 100
-                # slopelistVV.append(slope[0])
-                # slopelistVH.append(slope[1])
-                slopelistVV.append(0)
-                slopelistVH.append(0)
+                slopelistVV.append(slope[0])
+                slopelistVH.append(slope[1])
+                # slopelistVV.append(0)
+                # slopelistVH.append(0)
 
                 # get mean
-                mean = self.get_sig0mean(subpx[0],subpx[1],path)
-                # mean = np.float32(mean)
-                # mean[mean != -9999] = mean[mean != -9999] / 100
+                mean = self.get_sig0mean(subpx[0],subpx[1], path)
+                mean = np.float32(mean)
+                mean[mean != -9999] = mean[mean != -9999] / 100
                 meanlistVV.append(mean[0])
                 meanlistVH.append(mean[1])
 
                 # get standard deviation
-                sd = self.get_sig0sd(subpx[0],subpx[1],path)
-                # sd = np.float32(sd)
-                # sd[sd != -9999] = sd[sd != -9999] / 100
+                sd = self.get_sig0sd(subpx[0],subpx[1], path)
+                sd = np.float32(sd)
+                sd[sd != -9999] = sd[sd != -9999] / 100
                 sdlistVV.append(sd[0])
                 sdlistVH.append(sd[1])
 
@@ -348,7 +381,9 @@ class Trainingset(object):
                 slist.append(terr[2])
 
                 # get sig0 and lia timeseries
-                tmp_series = exTS.extr_SIG0_LIA_ts(self.sgrt_root, 'S1AIWGRDH', 'A0111', 'resampled', 10, subpx[0], subpx[1], 1, 1, pol_name=['VV','VH'], grid='Equi7', hour=hour)
+                tmp_series = exTS.read_NORM_SIG0(self.sgrt_root, 'S1AIWGRDH', 'A0112', 'normalized', 10,
+                                                 subpx[0], subpx[1], 1, 1, pol_name=['VV','VH'], grid='Equi7')
+                # lia_series = exTS.extr_SIG0_LIA_ts(self.sgrt_root, 'S1AIWGRDH', 'A0111', 'resampled', 10, subpx[0], subpx[1], 1, 1, pol_name=['VV','VH'], grid='Equi7')
                 sig0vv = np.float32(tmp_series[1]['sig0'])
                 sig0vh = np.float32(tmp_series[1]['sig02'])
                 lia = np.float32(tmp_series[1]['lia'])
@@ -399,7 +434,7 @@ class Trainingset(object):
             arr_vh = np.array(df_vh)
             arr_lia = np.array(df_lia)
 
-            mask = (arr_vv == -9999) | (arr_vv < -20.00) | (arr_vh == -9999) | (arr_vh < -20.00) | \
+            mask = (arr_vv == -9999) | (arr_vv < -15.00) | (arr_vh == -9999) | (arr_vh < -15.00) | \
                    (arr_lia < 10.00) | (arr_lia > 50.00)
 
             df_vv.iloc[mask] = np.nan
@@ -407,7 +442,7 @@ class Trainingset(object):
             df_lia.iloc[mask] = np.nan
 
             # mask months
-            monthmask = (df_vv.index.map(lambda x: x.month) > 4) & (df_vv.index.map(lambda x: x.month) < 11)
+            monthmask = (df_vv.index.map(lambda x: x.month) > 1) & (df_vv.index.map(lambda x: x.month) < 12)
 
             # calculate spatial mean and standard deviation
             df_vv_mean = 10*np.log10(df_vv.mean(1)[monthmask])
@@ -443,19 +478,7 @@ class Trainingset(object):
                 if len(id[0]) > 0:
                     ssm_series.iloc[i] = tmp_ssm[1][id]
 
-
-
-            # tmp_vv = pd.DataFrame(df_vv_mean)
-            # tmp_df_ssm = pd.DataFrame(tmp_ssm[1], index=tmp_ssm[0])
-            # tmp_df_ssm.index = tmp_df_ssm.index.to_datetime().date
-            # tmp_vv.index = tmp_vv.index.date
-            # ssm_dict = {'ssm': df_ssm[0], 'vv': tmp_vv[0]}
-            # df_ssm = pd.DataFrame(ssm_dict)
-            # df_ssm = tmp_vv.join(tmp_df_ssm, how='left', lsuffix='_vv', rsuffix='_ssm')
-            # df_ssm = df_ssm['0_ssm']
             tmp_ssm = None
-            # tmp_vv = None
-            # tmp_df_ssm = None
 
             # calculate mean temporal mean and standard deviation and slope
             meanMeanVV = np.mean(meanlistVV[meanlistVV != -9999])
@@ -521,10 +544,12 @@ class Trainingset(object):
 
         # get lat/lon of aoi
         Eq7SAR = Equi7Grid(10)
-        ll = Eq7SAR.equi7xy2lonlat("EU", aoi[0]+5000, aoi[1]+5000)
-        ur = Eq7SAR.equi7xy2lonlat("EU", aoi[2]-5000, aoi[3]-5000)
-        # subtract a buffer to make shure the selected ease grid point are within the aoi
-        aoi_latlon = [ll[0],ll[1],ur[0],ur[1]]
+        aoi_latlon = list()
+        for subaoi in aoi:
+            ll = Eq7SAR.equi7xy2lonlat("EU", subaoi[0]+5000, subaoi[1]+5000)
+            ur = Eq7SAR.equi7xy2lonlat("EU", subaoi[2]-5000, subaoi[3]-5000)
+            # subtract a buffer to make shure the selected ease grid point are within the aoi
+            aoi_latlon.append([ll[0],ll[1],ur[0],ur[1]])
 
         # load EASE grid definition
         EASE_lats = np.fromfile('/mnt/SAT/Workspaces/GrF/01_Data/EASE20/EASE2_M09km.lats.3856x1624x1.double', dtype=np.float64)
@@ -537,23 +562,25 @@ class Trainingset(object):
         for irow in range(3856):
             for icol in range(1624):
 
-                if (EASE_lons[irow,icol] > aoi_latlon[0]) & \
-                        (EASE_lons[irow,icol] < aoi_latlon[2]) & \
-                        (EASE_lats[irow,icol] > aoi_latlon[1]) & \
-                        (EASE_lats[irow,icol] < aoi_latlon[3]):
-                    EASEpoint.append((irow,icol))
-
-
+                subaoi_counter = 0
+                for subaoi in aoi_latlon:
+                    if (EASE_lons[irow,icol] > subaoi[0]) & \
+                            (EASE_lons[irow,icol] < subaoi[2]) & \
+                            (EASE_lats[irow,icol] > subaoi[1]) & \
+                            (EASE_lats[irow,icol] < subaoi[3]):
+                        EASEpoint.append((irow,icol, subaoi_counter))
+                    subaoi_counter = subaoi_counter + 1
 
         # create list of 100 random points
         points = set()
         usedEASE = list()
 
-        while len(points) <= 40:
+        #while len(points) <= 50:
+        for randInd in range(len(EASEpoint)):
             # tmpx = random.randint(aoi[0]+4500, aoi[2]-4500)
             # tmpy = random.randint(aoi[1]+4500, aoi[3]-4500)
             # draw a point from the list of EASE points
-            randInd = random.randint(0, len(EASEpoint)-1)
+            #randInd = random.randint(0, len(EASEpoint)-1)
             # store the used points to avoid double usage
             if randInd not in usedEASE:
                 usedEASE.append(randInd)
@@ -566,17 +593,21 @@ class Trainingset(object):
                 ValidLCind = np.where((LCpx == 10) | (LCpx == 12) |
                                       (LCpx == 13) | (LCpx == 18) |
                                       (LCpx == 26) | (LCpx == 29) |
-                                      (LCpx == 32))
+                                      (LCpx == 32) | (LCpx == 11) |
+                                      #(LCpx == 16) | (LCpx == 17) |
+                                      (LCpx == 19) | (LCpx == 20) |
+                                      (LCpx == 21) | (LCpx == 27) |
+                                      (LCpx == 28))
                 # check if at least 10 percent are usable pixels
                 ValidPrec = len(ValidLCind[0]) / (60.0*60.0)
 
                 if ValidPrec >= 0.1:
-                    points.add((int(round(tmpxy[1])), int(round(tmpxy[2]))))
+                    points.add((int(round(tmpxy[1])), int(round(tmpxy[2])), EASEpoint[randInd][2]))
 
                 # check if open land
                 # if LCpx in [10, 12, 13, 18, 26, 29, 32]:
                 #     points.add((tmpxy[0],tmpxy[1]))
-
+        print(len(points))
         return(points)
 
 
@@ -614,13 +645,13 @@ class Trainingset(object):
         tilename = Eq7Par.identfy_tile('EU', (x,y))
         Stile = SgrtTile(dir_root=self.sgrt_root,
                          product_id='S1AIWGRDH',
-                         soft_id='B0210',
+                         soft_id='B0212',
                          product_name='sig0m',
                          ftile=tilename,
                          src_res=10)
 
-        SfilenameVV = [xs for xs in Stile._tile_files if 'SIGSL' in xs and 'VV' in xs]
-        SfilenameVH = [xs for xs in Stile._tile_files if 'SIGSL' in xs and 'VH' in xs]
+        SfilenameVV = [xs for xs in Stile._tile_files if 'SIGSL' in xs and 'VV' in xs and '_qlook' not in xs]
+        SfilenameVH = [xs for xs in Stile._tile_files if 'SIGSL' in xs and 'VH' in xs and '_qlook' not in xs]
         SfilenameVV = Stile.dir + '/' + SfilenameVV[0] + '.tif'
         SfilenameVH = Stile.dir + '/' + SfilenameVH[0] + '.tif'
 
@@ -634,7 +665,7 @@ class Trainingset(object):
         return (slopeVV, slopeVH)
 
 
-    def get_sig0mean(self, x, y, path):
+    def get_sig0mean(self, x, y, path=None):
 
         import math
 
@@ -645,13 +676,16 @@ class Trainingset(object):
         tilename = Eq7Par.identfy_tile('EU', (x,y))
         Stile = SgrtTile(dir_root=self.sgrt_root,
                          product_id='S1AIWGRDH',
-                         soft_id='B0211',
+                         soft_id='B0212',
                          product_name='sig0m',
                          ftile=tilename,
                          src_res=10)
-
-        SfilenameVV = [xs for xs in Stile._tile_files if 'SIG0M' in xs and 'VV' in xs and path in xs and '_qlook' not in xs]
-        SfilenameVH = [xs for xs in Stile._tile_files if 'SIG0M' in xs and 'VH' in xs and path in xs and'_qlook' not in xs]
+        if path != None:
+            SfilenameVV = [xs for xs in Stile._tile_files if 'SIG0M' in xs and 'VV' in xs and path in xs and '_qlook' not in xs]
+            SfilenameVH = [xs for xs in Stile._tile_files if 'SIG0M' in xs and 'VH' in xs and path in xs and'_qlook' not in xs]
+        else:
+            SfilenameVV = [xs for xs in Stile._tile_files if 'SIG0M' in xs and 'VV' in xs and '_qlook' not in xs]
+            SfilenameVH = [xs for xs in Stile._tile_files if 'SIG0M' in xs and 'VH' in xs and '_qlook' not in xs]
         if len(SfilenameVH) == 0 | len(SfilenameVV) == 0:
             return (-9999, -9999)
         SfilenameVV = Stile.dir + '/' + SfilenameVV[0] + '.tif'
@@ -684,15 +718,21 @@ class Trainingset(object):
         tilename = Eq7Par.identfy_tile('EU', (x,y))
         Stile = SgrtTile(dir_root=self.sgrt_root,
                          product_id='S1AIWGRDH',
-                         soft_id='B0211',
+                         soft_id='B0212',
                          product_name='sig0m',
                          ftile=tilename,
                          src_res=10)
 
-        SfilenameVV = [xs for xs in Stile._tile_files if 'SIGSD' in xs and 'VV' in xs and path in xs and '_qlook' not in xs]
-        SfilenameVH = [xs for xs in Stile._tile_files if 'SIGSD' in xs and 'VH' in xs and path in xs and '_qlook' not in xs]
+        if path != None:
+            SfilenameVV = [xs for xs in Stile._tile_files if 'SIGSD' in xs and 'VV' in xs and path in xs and '_qlook' not in xs]
+            SfilenameVH = [xs for xs in Stile._tile_files if 'SIGSD' in xs and 'VH' in xs and path in xs and '_qlook' not in xs]
+        else:
+            SfilenameVV = [xs for xs in Stile._tile_files if 'SIGSD' in xs and 'VV' in xs and '_qlook' not in xs]
+            SfilenameVH = [xs for xs in Stile._tile_files if 'SIGSD' in xs and 'VH' in xs and '_qlook' not in xs]
+
         if len(SfilenameVH) == 0 | len(SfilenameVV) == 0:
             return (-9999, -9999)
+
         SfilenameVV = Stile.dir + '/' + SfilenameVV[0] + '.tif'
         SfilenameVH = Stile.dir + '/' + SfilenameVH[0] + '.tif'
 
@@ -764,7 +804,7 @@ class Trainingset(object):
 class Estimationset(object):
 
 
-    def __init__(self, sgrt_root, sig0mpath, dempath, outpath, mlmodel):
+    def __init__(self, sgrt_root, tile, sig0mpath, dempath, outpath, mlmodel):
 
         self.sgrt_root = sgrt_root
         self.outpath = outpath
@@ -773,53 +813,48 @@ class Estimationset(object):
 
         # get list of available parameter tiles
         # tiles = os.listdir(sig0mpath)
-        self.tiles = ['E048N015T1']
+        # self.tiles = ['E048N014T1']
+        self.tiles = tile
         self.mlmodel = mlmodel
 
 
-    def ssm_ts(self, x, y):
+    def ssm_ts(self, x, y, fdim):
 
+        from extr_TS import read_NORM_SIG0
         from extr_TS import extr_SIG0_LIA_ts
 
         # extract parameters
-        siglia_ts = extr_SIG0_LIA_ts(self.sgrt_root, 'S1AIWGRDH', 'A0111', 'resampled', 10, x, y, 3, 3,
+        siglia_ts = read_NORM_SIG0(self.sgrt_root, 'S1AIWGRDH', 'A0112', 'normalized', 10, x, y, fdim, fdim,
                                      pol_name=['VV', 'VH'], grid='Equi7')
 
         terr_arr = self.get_terrain(self.tiles[0])
-        param_arr_117 = self.get_params(self.tiles[0], '117')
-        param_arr_168 = self.get_params(self.tiles[0], '168')
-        bac_arr = self.get_sig0_lia(self.tiles[0], 'D20150505_170623')
+        param_arr = self.get_params(self.tiles[0])
+        bac_arr = self.get_sig0_lia(self.tiles[0], 'D20160417_170653')
         lc_arr = self.create_LC_mask(self.tiles[0], bac_arr)
 
         aoi_pxdim = [int((x-terr_arr['h'][1][0])/10),
                      int((terr_arr['h'][1][3]-y)/10),
-                     int((x-terr_arr['h'][1][0])/10)+3,
-                     int((terr_arr['h'][1][3]-y)/10)+3]
+                     int((x-terr_arr['h'][1][0])/10)+fdim,
+                     int((terr_arr['h'][1][3]-y)/10)+fdim]
         a = terr_arr['a'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
         s = terr_arr['s'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
         h = terr_arr['h'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
-        sig0mVV_117 = param_arr_117['sig0mVV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
-        sig0mVH_117 = param_arr_117['sig0mVH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
-        sig0sdVV_117 = param_arr_117['sig0sdVV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
-        sig0sdVH_117 = param_arr_117['sig0sdVH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
-        sig0mVV_168 = param_arr_168['sig0mVV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
-        sig0mVH_168 = param_arr_168['sig0mVH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
-        sig0sdVV_168 = param_arr_168['sig0sdVV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
-        sig0sdVH_168 = param_arr_168['sig0sdVH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        sig0mVV = param_arr['sig0mVV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        sig0mVH = param_arr['sig0mVH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        sig0sdVV = param_arr['sig0sdVV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        sig0sdVH = param_arr['sig0sdVH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        slpVV = param_arr['slpVV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        slpVH = param_arr['slpVH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
 
         lc_mask = lc_arr[aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
         terr_mask = (a != -9999) & \
                     (s != -9999) & \
                     (h != -9999)
 
-        param_mask_117 = (sig0mVH_117 != -9999) & \
-                          (sig0mVV_117 != -9999) & \
-                          (sig0sdVH_117 != -9999) & \
-                          (sig0sdVV_117 != -9999)
-        param_mask_168 = (sig0mVH_168 != -9999) & \
-                          (sig0mVV_168 != -9999) & \
-                          (sig0sdVH_168 != -9999) & \
-                          (sig0sdVV_168 != -9999)
+        param_mask = (sig0mVH != -9999) & \
+                     (sig0mVV != -9999) & \
+                     (sig0sdVH != -9999) & \
+                     (sig0sdVV != -9999)
 
         ssm_ts_out = (siglia_ts[0], np.full((len(siglia_ts[0])), -9999, dtype=np.float32))
 
@@ -833,43 +868,83 @@ class Estimationset(object):
 
             mask = lc_mask & terr_mask & sig0_mask
 
-            tmp_smc_arr = np.full((3,3), -9999, dtype=np.float32)
+            tmp_smc_arr = np.full((fdim,fdim), -9999, dtype=np.float32)
 
             #estimate smc for each pixel in the 10x10 footprint
-            for ix in range(3):
-                for iy in range(3):
+            # create a list of aeach feature
+            sig0_l = list()
+            sig02_l = list()
+            sigvvssd_l = list()
+            sigvhssd_l = list()
+            lia_l = list()
+            liassd_l = list()
+            sig0mvv_l = list()
+            sig0sdvv_l = list()
+            sig0mvh_l = list()
+            sig0sdvh_l = list()
+            slpvv_l = list()
+            slpvh_l = list()
+            h_l = list()
+            a_l = list()
+            s_l = list()
+
+
+            for ix in range(fdim):
+                for iy in range(fdim):
 
                     if mask[iy,ix] == True:
-                        if siglia_ts[0][i].hour == 5:
-                            sig0mVV = sig0mVV_168
-                            sig0sdVV = sig0sdVV_168
-                            sig0mVH = sig0mVH_168
-                            sig0sdVH = sig0sdVH_168
-                            param_mask = param_mask_168
-                        elif siglia_ts[0][i].hour == 17:
-                            sig0mVV = sig0mVV_117
-                            sig0sdVV = sig0sdVV_117
-                            sig0mVH = sig0mVH_117
-                            sig0sdVH = sig0sdVH_117
-                            param_mask = param_mask_117
 
                         if param_mask[iy,ix] == True:
-                            fvect = [np.float32(siglia_ts[1]['sig0'][i,iy,ix])/100,
-                                     np.float32(siglia_ts[1]['sig02'][i, iy, ix]) / 100,
-                                     np.float32(siglia_ts[1]['lia'][i, iy, ix]) / 100,
-                                     sig0mVV[iy, ix],
-                                     sig0sdVV[iy,ix],
-                                     sig0mVH[iy,ix],
-                                     sig0sdVH[iy,ix],
-                                     h[iy,ix],
-                                     a[iy,ix],
-                                     s[iy,ix]]
-                            fvect = self.mlmodel[1].transform(fvect)
-                            tmp_smc_arr[iy,ix] = self.mlmodel[0].predict(fvect)
+                            # fvect = [np.float32(siglia_ts[1]['sig0'][i,iy,ix])/100.,
+                            #          np.float32(siglia_ts[1]['sig02'][i, iy, ix])/100.,
+                            #          np.float32(siglia_ts[1]['lia'][i, iy, ix])/100.,
+                            #          sig0mVV[iy, ix] / 100.,
+                            #          sig0sdVV[iy,ix] / 100.,
+                            #          sig0mVH[iy,ix] / 100.,
+                            #          sig0sdVH[iy,ix] / 100.,
+                            #          slpVV[iy,ix],
+                            #          slpVH[iy,ix], #]
+                            #          h[iy,ix],
+                            #          a[iy,ix],
+                            #          s[iy,ix]]
+                            # fvect = self.mlmodel[1].transform(fvect)
+                            # tmp_smc_arr[iy,ix] = self.mlmodel[0].predict(fvect)
+                            sig0_l.append(np.float32(siglia_ts[1]['sig0'][i,iy,ix])/100.)
+                            sig02_l.append(np.float32(siglia_ts[1]['sig02'][i,iy,ix])/100.)
+                            lia_l.append(np.float32(siglia_ts[1]['lia'][i, iy, ix])/100.)
+                            sig0mvv_l.append(sig0mVV[iy, ix] / 100.)
+                            sig0sdvv_l.append(sig0sdVV[iy,ix] / 100.)
+                            sig0mvh_l.append(sig0mVH[iy, ix] / 100.)
+                            sig0sdvh_l.append(sig0sdVH[iy,ix] / 100.)
+                            slpvv_l.append(slpVV[iy,ix])
+                            slpvh_l.append(slpVH[iy,ix])
+                            h_l.append(h[iy,ix])
+                            a_l.append(a[iy,ix])
+                            s_l.append(s[iy,ix])
 
-            val_ssm = tmp_smc_arr[tmp_smc_arr != -9999]
+            if len(sig0_l) > 0:
+                # calculate average of features
+                fvect = [10 * np.log10(np.mean(np.power(10, (np.array(sig0_l) / 10.)))),
+                         10 * np.log10(np.mean(np.power(10, (np.array(sig02_l) / 10.)))),
+                         10 * np.log10(np.std(np.power(10, (np.array(sig0_l) / 10.)))),
+                         10 * np.log10(np.std(np.power(10, (np.array(sig02_l) / 10.)))),
+                         #np.mean(np.array(lia_l)),
+                         #np.std(np.array(lia_l)),
+                         10 * np.log10(np.mean(np.power(10, (np.array(sig0mvv_l) / 10.)))),
+                         10 * np.log10(np.mean(np.power(10, (np.array(sig0sdvv_l) / 10.)))),
+                         10 * np.log10(np.mean(np.power(10, (np.array(sig0mvh_l) / 10.)))),
+                         10 * np.log10(np.mean(np.power(10, (np.array(sig0sdvh_l) / 10.)))),
+                         np.mean(np.array(slpvv_l)),
+                         np.mean(np.array(slpvh_l))]#,
+                         #np.mean(np.array(h_l)),
+                         #np.mean(np.array(a_l)),
+                         #np.mean(np.array(s_l))]
 
-            if len(val_ssm) > 0: ssm_ts_out[1][i] = np.mean(val_ssm)
+                ## val_ssm = tmp_smc_arr[tmp_smc_arr != -9999]
+                # if len(val_ssm) > 0: ssm_ts_out[1][i] = np.mean(val_ssm)
+
+                fvect = self.mlmodel[1].transform(fvect)
+                ssm_ts_out[1][i] = self.mlmodel[0].predict(fvect)
 
 
 
@@ -881,15 +956,20 @@ class Estimationset(object):
         plt.figure(figsize=(18, 6))
         plt.plot(xx,yy)
         plt.show()
-        plt.savefig(self.outpath + 'ts.png')
+        plt.savefig(self.outpath + 'ts' + str(x) + '_' + str(y) + '.png')
         plt.close()
+        csvout = np.array([m.strftime("%B %d, %Y") for m in ssm_ts_out[0][valid]], dtype=np.str)
+        csvout2 = np.array(ssm_ts_out[1][valid], dtype=np.str)
+        # np.savetxt(self.outpath + 'ts.csv', np.hstack((csvout, csvout2)), fmt="%-10c", delimiter=",")
+        with open(self.outpath + 'ts' + str(x) + '_' + str(y) + '.csv', 'w') as text_file:
+            [text_file.write(csvout[i] + ', ' + csvout2[i] + '\n') for i in range(len(csvout))]
 
         print(ssm_ts_out[0][valid])
 
         print("Done")
 
 
-    def ssm_map(self, date, path):
+    def ssm_map(self, date, path=None):
 
         from joblib import Parallel, delayed, load, dump
         import sys
@@ -924,11 +1004,11 @@ class Estimationset(object):
             valid_ind = np.where(mask == True)
             valid_ind = np.ravel_multi_index(valid_ind, (10000,10000))
 
-            # vv_sstd = _local_std(bacArrs['sig0vv'][0], -9999, valid_ind)
-            # vh_sstd = _local_std(bacArrs['sig0vh'][0], -9999, valid_ind)
-            # lia_sstd = _local_std(bacArrs['lia'][0], -9999, valid_ind, "lia")
+            #vv_sstd = _local_std(bacArrs['sig0vv'][0], -9999, valid_ind)
+            #vh_sstd = _local_std(bacArrs['sig0vh'][0], -9999, valid_ind)
+            #lia_sstd = _local_std(bacArrs['lia'][0], -9999, valid_ind, "lia")
 
-            # bacStats = {"vv": vv_sstd, "vh": vh_sstd, "lia": lia_sstd}
+            #bacStats = {"vv": vv_sstd, "vh": vh_sstd, 'lia': lia_sstd}
             bacStats = {'vv': bacArrs['sig0vv'][0], 'vh': bacArrs['sig0vh'][0], 'lia': bacArrs['lia'][0]}
 
             ssm_out = np.full((10000,10000), -9999, dtype=np.float32)
@@ -957,7 +1037,7 @@ class Estimationset(object):
             Parallel(n_jobs=8, verbose=5, max_nbytes=None)(delayed(_estimate_ssm)(large_memmap[0],large_memmap[1],large_memmap[2], large_memmap[3],ssm_out,i,self.mlmodel) for i in ind_splits)
 
             # write ssm out
-            self.write_ssm(tname, bacArrs, ssm_out)
+            self.write_ssm(tname, date, bacArrs, ssm_out)
 
             try:
                 shutil.rmtree(temp_folder)
@@ -972,14 +1052,20 @@ class Estimationset(object):
         # read sig0 vv/vh and lia in arrays
         tile = SgrtTile(dir_root=self.sgrt_root,
                         product_id='S1AIWGRDH',
-                        soft_id='A0111',
-                        product_name='resampled',
+                        soft_id='A0112',
+                        product_name='normalized',
                         ftile='EU010M_'+tname,
                         src_res=10)
+        tile_lia = SgrtTile(dir_root=self.sgrt_root,
+                            product_id='S1AIWGRDH',
+                            soft_id='A0111',
+                            product_name='resampled',
+                            ftile='EU010M_'+tname,
+                            src_res=10)
 
         sig0vv = tile.read_tile(pattern=date+'.*VV.*')
         sig0vh = tile.read_tile(pattern=date+'.*VH.*')
-        lia = tile.read_tile(pattern=date+'.*_LIA.*')
+        lia = tile_lia.read_tile(pattern=date+'.*_LIA.*')
 
         return {'sig0vv': sig0vv, 'sig0vh': sig0vh, 'lia': lia}
 
@@ -1013,15 +1099,18 @@ class Estimationset(object):
         return {'h': (h, elevGeo), 'a': (a, aspGeo), 's': (s, slpGeo)}
 
 
-    def get_params(self, tname, path):
+    def get_params(self, tname, path=None):
 
         # get slope and sig0 mean and standard deviation
         Stile = SgrtTile(dir_root=self.sgrt_root,
                          product_id='S1AIWGRDH',
-                         soft_id='B0211',
+                         soft_id='B0212',
                          product_name='sig0m',
                          ftile='EU010M_' + tname,
                          src_res=10)
+
+        if path == None:
+            path = ''
 
         slpVV = Stile.read_tile(pattern='.*SIGSL.*VV'+path+'.*T1$')
         slpVH = Stile.read_tile(pattern='.*SIGSL.*VH'+path+'.*T1$')
@@ -1048,7 +1137,8 @@ class Estimationset(object):
 
         #generate mask
         tmp = np.array(lcArr[0])
-        mask = (tmp == 10) | (tmp == 12) | (tmp == 13) | (tmp == 18) | (tmp == 26) | (tmp == 29) | (tmp == 32)
+        mask = (tmp == 10) | (tmp == 12) | (tmp == 13) | (tmp == 18) | (tmp == 26) | (tmp == 29) | (tmp == 32) | \
+               (tmp == 11) | (tmp == 19) | (tmp == 20) | (tmp == 21) | (tmp == 27) | (tmp == 28)
 
         return mask
 
@@ -1094,7 +1184,7 @@ class Estimationset(object):
         return (LC, LCgeo)
 
 
-    def write_ssm(self, tname, bacArrs, outarr):
+    def write_ssm(self, tname, date, bacArrs, outarr):
 
         # write ssm map
         dst_proj = bacArrs['sig0vv'][1]['spatialreference']
@@ -1103,10 +1193,18 @@ class Estimationset(object):
         dst_height = 10000
 
         # set up output file
-        ssm_path = self.outpath + tname+'_SSM.tif'
-        ssm_map = gdal.GetDriverByName('GTiff').Create(ssm_path, dst_width, dst_height, 1, gdalconst.GDT_Float32)
+        ssm_path = self.outpath + tname+'_SSM_' + date + '.tif'
+        ssm_map = gdal.GetDriverByName('GTiff').Create(ssm_path, dst_width, dst_height, 1, gdalconst.GDT_Int16)
         ssm_map.SetGeoTransform(dst_geotrans)
         ssm_map.SetProjection(dst_proj)
+
+        # transform array to byte
+        valid = np.where(outarr != -9999)
+        novalid = np.where(outarr == -9999)
+        outarr[valid] = np.around(outarr[valid] * 100)
+        outarr[novalid] = -9999
+        outarr = outarr.astype(dtype=np.int16)
+
 
         # write data
         ssm_outband = ssm_map.GetRasterBand(1)
@@ -1129,29 +1227,35 @@ def _estimate_ssm(bacArrs, terrainArrs, paramArr, bacStats, ssm_out, valid_ind, 
             h = terrainArrs['h'][0][ind]
             a = terrainArrs['a'][0][ind]
             s = terrainArrs['s'][0][ind]
-            # slpvv = paramArr['slpVV'][0][ind] / 100.0
-            # slpvh = paramArr['slpVH'][0][ind] / 100.0
-            sig0mvv = paramArr['sig0mVV'][0][ind]# / 100.0
-            sig0mvh = paramArr['sig0mVH'][0][ind]# / 100.0
-            sig0sdvv = paramArr['sig0sdVV'][0][ind]# / 100.0
-            sig0sdvh = paramArr['sig0sdVH'][0][ind]# / 100.0
+            slpvv = paramArr['slpVV'][0][ind]
+            slpvh = paramArr['slpVH'][0][ind]
+            sig0mvv = paramArr['sig0mVV'][0][ind] / 100.0
+            sig0mvh = paramArr['sig0mVH'][0][ind] / 100.0
+            sig0sdvv = paramArr['sig0sdVV'][0][ind] / 100.0
+            sig0sdvh = paramArr['sig0sdVH'][0][ind] / 100.0
             vvsstd = bacStats['vv'][ind]
             vhsstd = bacStats['vh'][ind]
             liasstd = bacStats['lia'][ind]
-
-            # fvect = [sig0vv, sig0vh, vvsstd, vhsstd, lia, liasstd, sig0mvv, sig0sdvv, sig0mvh, sig0sdvh, h, a, s]
-            # fvect = [sig0vv, sig0vh, vvsstd, vhsstd, lia, liasstd, sig0mvv, sig0sdvv, sig0mvh, sig0sdvh]
 
             # normalize sig0
             # if slpvv != 0: sig0vv = sig0vv - slpvv*(lia-30)
             # if slpvh != 0: sig0vh = sig0vh - slpvh*(lia-30)
 
-
-            # fvect = [sig0vv, sig0vh, vvsstd, vhsstd, lia, liasstd, sig0mvv, sig0sdvv, sig0mvh, sig0sdvh, h, a, s]
-            # fvect = [sig0vv, sig0vh, vvsstd, vhsstd, lia, liasstd, sig0mvv, sig0sdvv, sig0mvh, sig0sdvh]
-            fvect = [sig0vv, sig0vh, lia, sig0mvv, sig0sdvv, sig0mvh, sig0sdvh, h, a, s]
-            #fvect = [sig0vv, sig0vh, lia, sig0mvv, sig0sdvv, sig0mvh, sig0sdvh]
-            # fvect = [sig0vv, sig0vh, sig0mvv, sig0sdvv, sig0mvh, sig0sdvh]
+            fvect = [(sig0vv-sig0mvv)/sig0sdvv,
+                     (sig0vh-sig0sdvh)/sig0sdvh,
+                     #vvsstd,
+                     #vhsstd,
+                     #lia,
+                     #liasstd,
+                     #sig0mvv,
+                     #sig0sdvv,
+                     #sig0mvh,
+                     #sig0sdvh,
+                     slpvv,
+                     slpvh,
+                     h,
+                     a,
+                     s]
 
             fvect = mlmodel[1].transform(fvect)
             # predict ssm
@@ -1229,8 +1333,8 @@ def _calc_std(inarr, outarr, valid_ind, shape):
     for i in valid_ind:
         ind = np.unravel_index(i, shape)
 
-        if (ind[0] >= 3) and (ind[0] <= shape[0]-4) and (ind[1] >= 3) and (ind[1] <= shape[1]-4):
-            outarr[ind] = np.nanstd(inarr[ind[0] - 3:ind[0] + 3, ind[1] - 3:ind[1] + 3])
+        if (ind[0] >= 5) and (ind[0] <= shape[0]-6) and (ind[1] >= 5) and (ind[1] <= shape[1]-6):
+            outarr[ind] = np.nanstd(inarr[ind[0] - 5:ind[0] + 5, ind[1] - 5:ind[1] + 5])
 
 
 def _local_mean(arr, nanval):

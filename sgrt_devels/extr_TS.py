@@ -176,6 +176,95 @@ def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, 
     return outtuple
 
 
+def read_NORM_SIG0(dir_root, product_id, soft_id, product_name, src_res, lon, lat, xdim, ydim, pol_name=None, grid=None):
+    # initialise grid
+    alpGrid = Equi7.Equi7Grid(src_res)
+
+    # identify tile
+    if grid is None:
+        Equi7XY = alpGrid.lonlat2equi7xy(lon, lat)
+    elif grid == 'Equi7':
+        Equi7XY = ['EU', lon, lat]
+    TileName = alpGrid.identfy_tile(Equi7XY[0], [Equi7XY[1], Equi7XY[2]])
+    TileExtent = Equi7.Equi7Tile(TileName).extent
+    # load tile
+    TOI = SgrtTile.SgrtTile(dir_root=dir_root, product_id=product_id, soft_id=soft_id, product_name=product_name,
+                            ftile=TileName, src_res=src_res)
+    TOI_LIA = SgrtTile.SgrtTile(dir_root=dir_root, product_id=product_id, soft_id='A0111', product_name='resampled',
+                                ftile=TileName, src_res=src_res) # TODO allow to specify different versions
+
+    # extract data
+    x = int((Equi7XY[1] - TileExtent[0]) / src_res)
+    y = int((TileExtent[3] - Equi7XY[2]) / src_res)
+
+
+    # extract data
+    if pol_name is None:
+        SIG0 = TOI.read_ts("SIGNM", x, y, xsize=xdim, ysize=ydim)
+        LIA = TOI_LIA.read_ts("PLIA_", x, y, xsize=xdim, ysize=ydim)
+
+        # check if date dublicates exist
+        udates = np.unique(SIG0[0], return_index=True)
+        days = np.array(SIG0[0])[udates[1]]
+        data = np.array(SIG0[1])[udates[1], :, :]
+        SIG0 = (days, data)
+
+    elif len(pol_name) == 1:
+        SIG0 = TOI.read_ts("SIGNM", x, y, xsize=xdim, ysize=ydim, pol_name=pol_name.upper())
+        LIA = TOI_LIA.read_ts("PLIA_", x, y, xsize=xdim, ysize=ydim)
+
+        # check if date dublicates exist
+        udates = np.unique(SIG0[0], return_index=True)
+        days = np.array(SIG0[0])[udates[1]]
+        data = np.array(SIG0[1])[udates[1], :, :]
+        SIG0 = (days, data)
+
+    elif len(pol_name) == 2:
+        SIG0 = TOI.read_ts("SIGNM", x, y, xsize=xdim, ysize=ydim, pol_name=pol_name[0].upper(), sat_pass='A')
+        SIG02 = TOI.read_ts("SIGNM", x, y, xsize=xdim, ysize=ydim, pol_name=pol_name[1].upper(), sat_pass='A')
+        LIA = TOI_LIA.read_ts("PLIA_", x, y, xsize=xdim, ysize=ydim)
+
+        # check if date dublicates exist
+        udates = np.unique(SIG0[0], return_index=True)
+        days = np.array(SIG0[0])[udates[1]]
+        data = np.array(SIG0[1])[udates[1], :, :]
+        SIG0 = (days, data)
+        udates = np.unique(SIG02[0], return_index=True)
+        days = np.array(SIG02[0])[udates[1]]
+        data = np.array(SIG02[1])[udates[1], :, :]
+        SIG02 = (days, data)
+        udates = np.unique(LIA[0], return_index=True)
+        days = np.array(LIA[0])[udates[1]]
+        data = np.array(LIA[1])[udates[1], :, :]
+        LIA = (days, data)
+
+    else:
+        return None
+
+    # format datelist and, in case of dual-pol, check if dates are available for both
+    # polarisations
+    datelistSIG = SIG0[0]
+    if len(pol_name) == 2:
+        datelistSIG2 = SIG02[0]
+    else:
+        datelistSIG2 = SIG0[0]
+
+    datelistLIA = LIA[0]
+
+    datelistFINAL = [x for x in datelistSIG if (x in datelistLIA) and (x in datelistSIG2)]
+
+    SIG0out = [SIG0[1][x, :, :] for x in range(len(SIG0[0])) if datelistSIG[x] in datelistFINAL]
+    LIAout = [LIA[1][x, :, :] for x in range(len(LIA[0])) if datelistLIA[x] in datelistFINAL]
+    if len(pol_name) == 1:
+        outtuple = (np.asarray(datelistFINAL), {'sig0': np.asarray(SIG0out), 'lia': np.asarray(LIAout)})
+    elif len(pol_name) == 2:
+        SIG0out2 = [SIG02[1][x, :, :] for x in range(len(SIG02[0])) if datelistSIG2[x] in datelistFINAL]
+        outtuple = (np.asarray(datelistFINAL),
+                    {'sig0': np.asarray(SIG0out), 'sig02': np.asarray(SIG0out2), 'lia': np.asarray(LIAout)})
+
+    # TOI = None
+
+    return outtuple
 
 #extract value of any given raster at band (band) at lat, lon
 def extr_raster_pixel_values(filename, bandnr, lat, lon, dtype):
