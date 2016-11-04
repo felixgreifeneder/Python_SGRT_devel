@@ -96,9 +96,9 @@ class Trainingset(object):
         #
         # get list of available parameter tiles
         #tiles = os.listdir(sig0mpath)
-        tiles = ['E051N015T1', 'E048N014T1', 'E045N014T1', 'E032N014T1', 'E034N008T1', 'E034N007T1', 'E049N016T1']
+        #tiles = ['E051N015T1', 'E048N014T1', 'E045N014T1', 'E032N014T1', 'E034N008T1', 'E034N007T1', 'E049N016T1']
         # portugal
-        #tiles = ['E032N014T1']
+        tiles = ['E032N014T1']
         extents = []
         for tname in tiles:
             tmptile = Equi7Tile('EU010M_' + tname)
@@ -126,8 +126,8 @@ class Trainingset(object):
 
         # define training and validation sets
         self.target = np.array(sig0lia['ssm'])[valid]
-        self.features = np.vstack(((np.array(sig0lia['sig0vv'])[valid]-np.array(sig0lia['vv_tmean'])[valid])/np.array(sig0lia['vv_tstd'])[valid],
-                                   (np.array(sig0lia['sig0vh'])[valid]-np.array(sig0lia['vh_tmean'])[valid])/np.array(sig0lia['vh_tstd'])[valid],
+        self.features = np.vstack((#(np.array(sig0lia['sig0vv'])[valid]-np.array(sig0lia['vv_tmean'])[valid])/np.array(sig0lia['vv_tstd'])[valid],
+                                   #(np.array(sig0lia['sig0vh'])[valid]-np.array(sig0lia['vh_tmean'])[valid])/np.array(sig0lia['vh_tstd'])[valid],
                                    #np.array(sig0lia['vv_sstd'])[valid],
                                    #np.array(sig0lia['vh_sstd'])[valid],
                                    #np.array(sig0lia['lia'])[valid],
@@ -136,11 +136,21 @@ class Trainingset(object):
                                    #np.array(sig0lia['vv_tstd'])[valid],
                                    #np.array(sig0lia['vh_tmean'])[valid],
                                    #np.array(sig0lia['vh_tstd'])[valid],
-                                   np.array(sig0lia['vv_slope'])[valid],
-                                   np.array(sig0lia['vh_slope'])[valid],#)).transpose()
-                                   np.array(sig0lia['height'])[valid],
-                                   np.array(sig0lia['aspect'])[valid],
-                                   np.array(sig0lia['slope'])[valid])).transpose()
+                                   np.array(sig0lia['sig0vv'])[valid],
+                                   np.array(sig0lia['sig0vh'])[valid],
+                                   np.array(sig0lia['vv_k1'])[valid],
+                                   np.array(sig0lia['vh_k1'])[valid],
+                                   np.array(sig0lia['vv_k2'])[valid],
+                                   np.array(sig0lia['vh_k2'])[valid],
+                                   np.array(sig0lia['vv_k3'])[valid],
+                                   np.array(sig0lia['vh_k3'])[valid],
+                                   np.array(sig0lia['vv_k4'])[valid],
+                                   np.array(sig0lia['vh_k4'])[valid])).transpose()
+                                   #np.array(sig0lia['vv_slope'])[valid],
+                                   #np.array(sig0lia['vh_slope'])[valid],#)).transpose()
+                                   #np.array(sig0lia['height'])[valid],
+                                   #np.array(sig0lia['aspect'])[valid],
+                                   #np.array(sig0lia['slope'])[valid])).transpose()
 
         print 'HELLO'
 
@@ -290,6 +300,7 @@ class Trainingset(object):
         import random
         import datetime as dt
         import os
+        from scipy.stats import moment
 
         cntr = 0
         if hour == 5:
@@ -338,12 +349,20 @@ class Trainingset(object):
             vvdict = {}
             vhdict = {}
             liadict = {}
-            slopelistVV = []
-            slopelistVH = []
+            # slopelistVV = []
+            # slopelistVH = []
             meanlistVV = []
             meanlistVH = []
             sdlistVV = []
             sdlistVH = []
+            kdict = {"k1listVV":  [],
+                     "k1listVH": [],
+                     "k2listVV": [],
+                     "k2listVH": [],
+                     "k3listVV": [],
+                     "k3listVH": [],
+                     "k4listVV": [],
+                     "k4listVH": []}
             hlist = []
             slist = []
             alist = []
@@ -352,27 +371,35 @@ class Trainingset(object):
             tsnum = 0
             for subpx in sig0points:
                 # get slope
-                slope = self.get_slope(subpx[0],subpx[1])
+                # slope = self.get_slope(subpx[0],subpx[1])
                 # slope = np.float32(slope)
                 # slope[slope != -9999] = slope[slope != -9999] / 100
-                slopelistVV.append(slope[0])
-                slopelistVH.append(slope[1])
+                # slopelistVV.append(slope[0])
+                # slopelistVH.append(slope[1])
                 # slopelistVV.append(0)
                 # slopelistVH.append(0)
 
                 # get mean
                 mean = self.get_sig0mean(subpx[0],subpx[1], path)
                 mean = np.float32(mean)
-                mean[mean != -9999] = mean[mean != -9999] / 100
+                mean[mean != -9999] = np.power(10,(mean[mean != -9999] / 100)/10)
                 meanlistVV.append(mean[0])
                 meanlistVH.append(mean[1])
 
                 # get standard deviation
                 sd = self.get_sig0sd(subpx[0],subpx[1], path)
                 sd = np.float32(sd)
-                sd[sd != -9999] = sd[sd != -9999] / 100
+                sd[sd != -9999] = np.power(10,(sd[sd != -9999] / 100)/10)
                 sdlistVV.append(sd[0])
                 sdlistVH.append(sd[1])
+
+                # get k statistics
+                #for kn in range(4):
+                #vvname = "k" + str(kn+1) + "listVV"
+                #vhname = "k" + str(kn+1) + "listVH"
+                k = self.get_kN(subpx[0],subpx[1],1,path)
+                kdict["k1listVV"].append(k[0]/1000.0)
+                kdict["k1listVH"].append(k[1]/1000.0)
 
                 # get height, aspect, and slope
                 terr = self.get_terrain(subpx[0],subpx[1])
@@ -381,8 +408,10 @@ class Trainingset(object):
                 slist.append(terr[2])
 
                 # get sig0 and lia timeseries
-                tmp_series = exTS.read_NORM_SIG0(self.sgrt_root, 'S1AIWGRDH', 'A0112', 'normalized', 10,
-                                                 subpx[0], subpx[1], 1, 1, pol_name=['VV','VH'], grid='Equi7')
+                #tmp_series = exTS.read_NORM_SIG0(self.sgrt_root, 'S1AIWGRDH', 'A0112', 'normalized', 10,
+                #                                 subpx[0], subpx[1], 1, 1, pol_name=['VV','VH'], grid='Equi7')
+                tmp_series = exTS.extr_SIG0_LIA_ts(self.sgrt_root, 'S1AIWGRDH', 'A0111', 'resampled', 10,
+                                                   subpx[0], subpx[1], 1, 1, pol_name=['VV','VH'], grid='Equi7', sat_pass='A')
                 # lia_series = exTS.extr_SIG0_LIA_ts(self.sgrt_root, 'S1AIWGRDH', 'A0111', 'resampled', 10, subpx[0], subpx[1], 1, 1, pol_name=['VV','VH'], grid='Equi7')
                 sig0vv = np.float32(tmp_series[1]['sig0'])
                 sig0vh = np.float32(tmp_series[1]['sig02'])
@@ -480,13 +509,32 @@ class Trainingset(object):
 
             tmp_ssm = None
 
+            # convert lists to numpy arrays
+            meanlistVV = np.array(meanlistVV)
+            meanlistVH = np.array(meanlistVH)
+            sdlistVV = np.array(sdlistVV)
+            sdlistVH = np.array(sdlistVH)
+            #klistVV = np.array(kdict['k1listVV'])
+            #klistVH = np.array(kdict['k1listVH'])
+            klistVV = np.log(meanlistVV)
+            klistVH = np.log(meanlistVH)
+
             # calculate mean temporal mean and standard deviation and slope
-            meanMeanVV = np.mean(meanlistVV[meanlistVV != -9999])
-            meanMeanVH = np.mean(meanlistVH[meanlistVH != -9999])
-            meanSdVV = np.mean(sdlistVV[sdlistVV != -9999])
-            meanSdVH = np.mean(sdlistVH[sdlistVH != -9999])
-            meanSlopeVV = np.mean(slopelistVV[slopelistVV != -9999])
-            meanSlopeVH = np.mean(slopelistVH[slopelistVH != -9999])
+            meanMeanVV = 10*np.log10(np.mean(meanlistVV[meanlistVV != -9999]))
+            meanMeanVH = 10*np.log10(np.mean(meanlistVH[meanlistVH != -9999]))
+            meanSdVV = 10*np.log10(np.mean(sdlistVV[sdlistVV != -9999]))
+            meanSdVH = 10*np.log10(np.mean(sdlistVH[sdlistVH != -9999]))
+            # meanSlopeVV = np.mean(slopelistVV[slopelistVV != -9999])
+            # meanSlopeVH = np.mean(slopelistVH[slopelistVH != -9999])
+            # calculate mean of temporal k statistics (upscaling)
+            meank1VV = np.mean(klistVV[klistVV != -9999])
+            meank1VH = np.mean(klistVH[klistVH != -9999])
+            meank2VV = moment(klistVV[klistVV != -9999], moment=2)
+            meank2VH = moment(klistVH[klistVH != -9999], moment=2)
+            meank3VV = moment(klistVV[klistVV != -9999], moment=3)
+            meank3VH = moment(klistVH[klistVH != -9999], moment=3)
+            meank4VV = moment(klistVV[klistVV != -9999], moment=4)
+            meank4VH = moment(klistVH[klistVH != -9999], moment=4)
             # calculate mean terrain parameters
             meanH = np.mean(hlist[hlist != -9999])
             meanA = np.mean(alist[alist != -9999])
@@ -505,8 +553,16 @@ class Trainingset(object):
                                    'vh_tmean': [meanMeanVH]*ll,
                                    'vv_tstd': [meanSdVV]*ll,
                                    'vh_tstd': [meanSdVH]*ll,
-                                   'vv_slope': [meanSlopeVV]*ll,
-                                   'vh_slope': [meanSlopeVH]*ll,
+                                   # 'vv_slope': [meanSlopeVV]*ll,
+                                   # 'vh_slope': [meanSlopeVH]*ll,
+                                   'vv_k1': [meank1VV]*ll,
+                                   'vh_k1': [meank1VH]*ll,
+                                   'vv_k2': [meank2VV] * ll,
+                                   'vh_k2': [meank2VH] * ll,
+                                   'vv_k3': [meank3VV] * ll,
+                                   'vh_k3': [meank3VH] * ll,
+                                   'vv_k4': [meank4VV] * ll,
+                                   'vh_k4': [meank4VH] * ll,
                                    'height': [meanH]*ll,
                                    'aspect': [meanA]*ll,
                                    'slope': [meanS]*ll}
@@ -523,8 +579,16 @@ class Trainingset(object):
                 sig0lia_samples['vh_tmean'].extend([meanMeanVH]*ll)
                 sig0lia_samples['vv_tstd'].extend([meanSdVV]*ll)
                 sig0lia_samples['vh_tstd'].extend([meanSdVH]*ll)
-                sig0lia_samples['vv_slope'].extend([meanSlopeVV]*ll)
-                sig0lia_samples['vh_slope'].extend([meanSlopeVH]*ll)
+                # sig0lia_samples['vv_slope'].extend([meanSlopeVV]*ll)
+                # sig0lia_samples['vh_slope'].extend([meanSlopeVH]*ll)
+                sig0lia_samples['vv_k1'].extend([meank1VV]*ll)
+                sig0lia_samples['vh_k1'].extend([meank1VH]*ll)
+                sig0lia_samples['vv_k2'].extend([meank2VV] * ll)
+                sig0lia_samples['vh_k2'].extend([meank2VH] * ll)
+                sig0lia_samples['vv_k3'].extend([meank3VV] * ll)
+                sig0lia_samples['vh_k3'].extend([meank3VH] * ll)
+                sig0lia_samples['vv_k4'].extend([meank4VV] * ll)
+                sig0lia_samples['vh_k4'].extend([meank4VH] * ll)
                 sig0lia_samples['height'].extend([meanH]*ll)
                 sig0lia_samples['aspect'].extend([meanA]*ll)
                 sig0lia_samples['slope'].extend([meanS]*ll)
@@ -746,6 +810,54 @@ class Trainingset(object):
         return (sdVV, sdVH)
 
 
+    def get_kN(self, x, y, n, path=None):
+
+        import math
+
+        # set up parameter grid
+        Eq7Par = Equi7Grid(10)
+
+        # get tile name of Equi7 10 grid
+        tilename = Eq7Par.identfy_tile('EU', (x, y))
+        Stile = SgrtTile(dir_root=self.sgrt_root,
+                         product_id='S1AIWGRDH',
+                         soft_id='B0212',
+                         product_name='sig0m',
+                         ftile=tilename,
+                         src_res=10)
+
+        knr = 'K' + str(n)
+        if path != None:
+            SfilenameVV = [xs for xs in Stile._tile_files if
+                           knr in xs and 'VV' in xs and path in xs and '_qlook' not in xs]
+            SfilenameVH = [xs for xs in Stile._tile_files if
+                           knr in xs and 'VH' in xs and path in xs and '_qlook' not in xs]
+        else:
+            SfilenameVV = [xs for xs in Stile._tile_files if knr in xs and 'VV' in xs and '_qlook' not in xs]
+            SfilenameVH = [xs for xs in Stile._tile_files if knr in xs and 'VH' in xs and '_qlook' not in xs]
+        if len(SfilenameVH) == 0 | len(SfilenameVV) == 0:
+            return (-9999, -9999)
+        SfilenameVV = Stile.dir + '/' + SfilenameVV[0] + '.tif'
+        SfilenameVH = Stile.dir + '/' + SfilenameVH[0] + '.tif'
+
+        SVV = gdal.Open(SfilenameVV, gdal.GA_ReadOnly)
+        SVH = gdal.Open(SfilenameVH, gdal.GA_ReadOnly)
+        SVVband = SVV.GetRasterBand(1)
+        SVHband = SVH.GetRasterBand(1)
+
+        img_x = int(math.floor((x - Stile.geotags['geotransform'][0]) / 10))
+        img_y = int(math.floor((Stile.geotags['geotransform'][3] - y) / 10))
+
+        if img_x == 10000 or img_y == 10000:
+            kVH = -9999
+            kVV = -9999
+        else:
+            kVV = SVVband.ReadAsArray(img_x, img_y, 1, 1)[0][0]
+            kVH = SVHband.ReadAsArray(img_x, img_y, 1, 1)[0][0]
+
+        return (kVV, kVH)
+
+
     def get_ssm(self, x, y):
         import math
         import datetime as dt
@@ -824,12 +936,12 @@ class Estimationset(object):
         from extr_TS import extr_SIG0_LIA_ts
 
         # extract parameters
-        siglia_ts = read_NORM_SIG0(self.sgrt_root, 'S1AIWGRDH', 'A0112', 'normalized', 10, x, y, fdim, fdim,
-                                     pol_name=['VV', 'VH'], grid='Equi7')
+        siglia_ts = extr_SIG0_LIA_ts(self.sgrt_root, 'S1AIWGRDH', 'A0111', 'resampled', 10, x, y, fdim, fdim,
+                                     pol_name=['VV', 'VH'], grid='Equi7', sat_pass='A', monthmask=[4,5,6,7,8,9,10])
 
         terr_arr = self.get_terrain(self.tiles[0])
         param_arr = self.get_params(self.tiles[0])
-        bac_arr = self.get_sig0_lia(self.tiles[0], 'D20160417_170653')
+        bac_arr = self.get_sig0_lia(self.tiles[0], 'D20160606_182733')
         lc_arr = self.create_LC_mask(self.tiles[0], bac_arr)
 
         aoi_pxdim = [int((x-terr_arr['h'][1][0])/10),
@@ -843,8 +955,16 @@ class Estimationset(object):
         sig0mVH = param_arr['sig0mVH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
         sig0sdVV = param_arr['sig0sdVV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
         sig0sdVH = param_arr['sig0sdVH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
-        slpVV = param_arr['slpVV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
-        slpVH = param_arr['slpVH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        #slpVV = param_arr['slpVV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        #slpVH = param_arr['slpVH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        k1VV = param_arr['k1VV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        k1VH = param_arr['k1VH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        k2VV = param_arr['k2VV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        k2VH = param_arr['k2VH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        k3VV = param_arr['k3VV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        k3VH = param_arr['k3VH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        k4VV = param_arr['k4VV'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
+        k4VH = param_arr['k4VH'][0][aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
 
         lc_mask = lc_arr[aoi_pxdim[1]:aoi_pxdim[3], aoi_pxdim[0]:aoi_pxdim[2]]
         terr_mask = (a != -9999) & \
@@ -874,19 +994,27 @@ class Estimationset(object):
             # create a list of aeach feature
             sig0_l = list()
             sig02_l = list()
-            sigvvssd_l = list()
-            sigvhssd_l = list()
+            #sigvvssd_l = list()
+            #sigvhssd_l = list()
             lia_l = list()
-            liassd_l = list()
+            #liassd_l = list()
             sig0mvv_l = list()
             sig0sdvv_l = list()
             sig0mvh_l = list()
             sig0sdvh_l = list()
-            slpvv_l = list()
-            slpvh_l = list()
+            #slpvv_l = list()
+            #slpvh_l = list()
             h_l = list()
             a_l = list()
             s_l = list()
+            k1vv_l = list()
+            k1vh_l = list()
+            k2vv_l = list()
+            k2vh_l = list()
+            k3vv_l = list()
+            k3vh_l = list()
+            k4vv_l = list()
+            k4vh_l = list()
 
 
             for ix in range(fdim):
@@ -916,26 +1044,42 @@ class Estimationset(object):
                             sig0sdvv_l.append(sig0sdVV[iy,ix] / 100.)
                             sig0mvh_l.append(sig0mVH[iy, ix] / 100.)
                             sig0sdvh_l.append(sig0sdVH[iy,ix] / 100.)
-                            slpvv_l.append(slpVV[iy,ix])
-                            slpvh_l.append(slpVH[iy,ix])
+                            #slpvv_l.append(slpVV[iy,ix])
+                            #slpvh_l.append(slpVH[iy,ix])
                             h_l.append(h[iy,ix])
                             a_l.append(a[iy,ix])
                             s_l.append(s[iy,ix])
+                            k1vv_l.append(k1VV[iy,ix]/1000.)
+                            k1vh_l.append(k1VH[iy,ix]/1000.)
+                            k2vv_l.append(k2VV[iy, ix]/1000.)
+                            k2vh_l.append(k2VH[iy, ix]/1000.)
+                            k3vv_l.append(k3VV[iy, ix]/1000.)
+                            k3vh_l.append(k3VH[iy, ix]/1000.)
+                            k4vv_l.append(k4VV[iy, ix]/1000.)
+                            k4vh_l.append(k4VH[iy, ix]/1000.)
 
             if len(sig0_l) > 0:
                 # calculate average of features
                 fvect = [10 * np.log10(np.mean(np.power(10, (np.array(sig0_l) / 10.)))),
                          10 * np.log10(np.mean(np.power(10, (np.array(sig02_l) / 10.)))),
-                         10 * np.log10(np.std(np.power(10, (np.array(sig0_l) / 10.)))),
-                         10 * np.log10(np.std(np.power(10, (np.array(sig02_l) / 10.)))),
+                         np.mean(np.array(k1vv_l)),
+                         np.mean(np.array(k1vh_l)),
+                         np.mean(np.array(k2vv_l)),
+                         np.mean(np.array(k2vh_l)),
+                         np.mean(np.array(k3vv_l)),
+                         np.mean(np.array(k3vh_l)),
+                         np.mean(np.array(k4vv_l)),
+                         np.mean(np.array(k4vh_l))]
+                         #10 * np.log10(np.std(np.power(10, (np.array(sig0_l) / 10.)))),
+                         #10 * np.log10(np.std(np.power(10, (np.array(sig02_l) / 10.)))),
                          #np.mean(np.array(lia_l)),
                          #np.std(np.array(lia_l)),
-                         10 * np.log10(np.mean(np.power(10, (np.array(sig0mvv_l) / 10.)))),
-                         10 * np.log10(np.mean(np.power(10, (np.array(sig0sdvv_l) / 10.)))),
-                         10 * np.log10(np.mean(np.power(10, (np.array(sig0mvh_l) / 10.)))),
-                         10 * np.log10(np.mean(np.power(10, (np.array(sig0sdvh_l) / 10.)))),
-                         np.mean(np.array(slpvv_l)),
-                         np.mean(np.array(slpvh_l))]#,
+                         #10 * np.log10(np.mean(np.power(10, (np.array(sig0mvv_l) / 10.)))),
+                         #10 * np.log10(np.mean(np.power(10, (np.array(sig0sdvv_l) / 10.)))),
+                         #10 * np.log10(np.mean(np.power(10, (np.array(sig0mvh_l) / 10.)))),
+                         #10 * np.log10(np.mean(np.power(10, (np.array(sig0sdvh_l) / 10.)))),
+                         #np.mean(np.array(slpvv_l)),
+                         #np.mean(np.array(slpvh_l))]#,
                          #np.mean(np.array(h_l)),
                          #np.mean(np.array(a_l)),
                          #np.mean(np.array(s_l))]
@@ -1052,8 +1196,8 @@ class Estimationset(object):
         # read sig0 vv/vh and lia in arrays
         tile = SgrtTile(dir_root=self.sgrt_root,
                         product_id='S1AIWGRDH',
-                        soft_id='A0112',
-                        product_name='normalized',
+                        soft_id='A0111',
+                        product_name='resampled',
                         ftile='EU010M_'+tname,
                         src_res=10)
         tile_lia = SgrtTile(dir_root=self.sgrt_root,
@@ -1112,19 +1256,35 @@ class Estimationset(object):
         if path == None:
             path = ''
 
-        slpVV = Stile.read_tile(pattern='.*SIGSL.*VV'+path+'.*T1$')
-        slpVH = Stile.read_tile(pattern='.*SIGSL.*VH'+path+'.*T1$')
+        #slpVV = Stile.read_tile(pattern='.*SIGSL.*VV'+path+'.*T1$')
+        #slpVH = Stile.read_tile(pattern='.*SIGSL.*VH'+path+'.*T1$')
         sig0mVV = Stile.read_tile(pattern='.*SIG0M.*VV'+path+'.*T1$')
         sig0mVH = Stile.read_tile(pattern='.*SIG0M.*VH'+path+'.*T1$')
         sig0sdVV = Stile.read_tile(pattern='.*SIGSD.*VV'+path+'.*T1$')
         sig0sdVH = Stile.read_tile(pattern='.*SIGSD.*VH'+path+'.*T1$')
+        k1VV = Stile.read_tile(pattern='.*K1.*VV'+path+'.*T1$')
+        k1VH = Stile.read_tile(pattern='.*K1.*VH' + path + '.*T1$')
+        k2VV = Stile.read_tile(pattern='.*K2.*VV' + path + '.*T1$')
+        k2VH = Stile.read_tile(pattern='.*K2.*VH' + path + '.*T1$')
+        k3VV = Stile.read_tile(pattern='.*K3.*VV' + path + '.*T1$')
+        k3VH = Stile.read_tile(pattern='.*K3.*VH' + path + '.*T1$')
+        k4VV = Stile.read_tile(pattern='.*K4.*VV' + path + '.*T1$')
+        k4VH = Stile.read_tile(pattern='.*K4.*VH' + path + '.*T1$')
 
-        return {'slpVV': slpVV,
-                'slpVH': slpVH,
+        return {#'slpVV': slpVV,
+                #'slpVH': slpVH,
                 'sig0mVV': sig0mVV,
                 'sig0mVH': sig0mVH,
                 'sig0sdVV': sig0sdVV,
-                'sig0sdVH': sig0sdVH}
+                'sig0sdVH': sig0sdVH,
+                'k1VV': k1VV,
+                'k1VH': k1VH,
+                'k2VV': k1VV,
+                'k2VH': k1VH,
+                'k3VV': k1VV,
+                'k3VH': k1VH,
+                'k4VV': k1VV,
+                'k4VH': k1VH}
 
 
     def create_LC_mask(self, tname, bacArrs):
@@ -1227,8 +1387,8 @@ def _estimate_ssm(bacArrs, terrainArrs, paramArr, bacStats, ssm_out, valid_ind, 
             h = terrainArrs['h'][0][ind]
             a = terrainArrs['a'][0][ind]
             s = terrainArrs['s'][0][ind]
-            slpvv = paramArr['slpVV'][0][ind]
-            slpvh = paramArr['slpVH'][0][ind]
+            #slpvv = paramArr['slpVV'][0][ind]
+            #slpvh = paramArr['slpVH'][0][ind]
             sig0mvv = paramArr['sig0mVV'][0][ind] / 100.0
             sig0mvh = paramArr['sig0mVH'][0][ind] / 100.0
             sig0sdvv = paramArr['sig0sdVV'][0][ind] / 100.0
@@ -1236,13 +1396,32 @@ def _estimate_ssm(bacArrs, terrainArrs, paramArr, bacStats, ssm_out, valid_ind, 
             vvsstd = bacStats['vv'][ind]
             vhsstd = bacStats['vh'][ind]
             liasstd = bacStats['lia'][ind]
+            k1VV = paramArr['k1VV'][0][ind]/1000.
+            k1VH = paramArr['k1VH'][0][ind]/1000.
+            k2VV = paramArr['k2VV'][0][ind]/1000.
+            k2VH = paramArr['k2VH'][0][ind]/1000.
+            k3VV = paramArr['k3VV'][0][ind]/1000.
+            k3VH = paramArr['k3VH'][0][ind]/1000.
+            k4VV = paramArr['k4VV'][0][ind]/1000.
+            k4VH = paramArr['k4VH'][0][ind]/1000.
+
 
             # normalize sig0
             # if slpvv != 0: sig0vv = sig0vv - slpvv*(lia-30)
             # if slpvh != 0: sig0vh = sig0vh - slpvh*(lia-30)
 
-            fvect = [(sig0vv-sig0mvv)/sig0sdvv,
-                     (sig0vh-sig0sdvh)/sig0sdvh,
+            fvect = [#(sig0vv-sig0mvv)/sig0sdvv,
+                     #(sig0vh-sig0sdvh)/sig0sdvh,
+                     sig0vv,
+                     sig0vh,
+                     k1VV,
+                     k1VH,
+                     k2VV,
+                     k2VH,
+                     k3VV,
+                     k3VH,
+                     k4VV,
+                     k4VH]
                      #vvsstd,
                      #vhsstd,
                      #lia,
@@ -1251,11 +1430,11 @@ def _estimate_ssm(bacArrs, terrainArrs, paramArr, bacStats, ssm_out, valid_ind, 
                      #sig0sdvv,
                      #sig0mvh,
                      #sig0sdvh,
-                     slpvv,
-                     slpvh,
-                     h,
-                     a,
-                     s]
+                     #slpvv,
+                     #slpvh,
+                     #h,
+                     #a,
+                     #s]
 
             fvect = mlmodel[1].transform(fvect)
             # predict ssm

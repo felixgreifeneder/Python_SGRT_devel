@@ -8,18 +8,18 @@ from sgrt_devels.compile_tset import Trainingset
 from sgrt_devels.compile_tset import Estimationset
 import pickle
 #
-# t = Trainingset('/mnt/SAT4/DATA/S1_EODC/',
-#                 '/mnt/SAT4/DATA/S1_EODC/Sentinel-1_CSAR/IWGRDH/parameters/datasets/sig0m/B0212/EQUI7_EU010M/',
-#                 '/mnt/SAT4/DATA/S1_EODC/', '/mnt/SAT4/DATA/S1_EODC/Sentinel-1_CSAR/IWGRDH/ancillary/datasets/DEM/',
-#                 '/mnt/SAT/Workspaces/GrF/Processing/S1ALPS/all_all/')
-#
-# model = t.train_model()
-model = pickle.load(open('/mnt/SAT/Workspaces/GrF/Processing/S1ALPS/all_all/mlmodel.p', 'rb'))
+t = Trainingset('/mnt/SAT4/DATA/S1_EODC/',
+                '/mnt/SAT4/DATA/S1_EODC/Sentinel-1_CSAR/IWGRDH/parameters/datasets/sig0m/B0212/EQUI7_EU010M/',
+                '/mnt/SAT4/DATA/S1_EODC/', '/mnt/SAT4/DATA/S1_EODC/Sentinel-1_CSAR/IWGRDH/ancillary/datasets/DEM/',
+                '/mnt/SAT/Workspaces/GrF/Processing/S1ALPS/port_kstats/')
 
-es = Estimationset('/mnt/SAT4/DATA/S1_EODC/', ['E048N015T1'],
+model = t.train_model()
+#model = pickle.load(open('/mnt/SAT/Workspaces/GrF/Processing/S1ALPS/port_kstats/mlmodel.p', 'rb'))
+
+es = Estimationset('/mnt/SAT4/DATA/S1_EODC/', ['E032N014T1'],
                '/mnt/SAT4/DATA/S1_EODC/Sentinel-1_CSAR/IWGRDH/parameters/datasets/sig0m/B0212/EQUI7_EU010M/',
                '/mnt/SAT4/DATA/S1_EODC/Sentinel-1_CSAR/IWGRDH/ancillary/datasets/DEM/',
-               '/mnt/SAT/Workspaces/GrF/Processing/S1ALPS/all_all/',
+               '/mnt/SAT/Workspaces/GrF/Processing/S1ALPS/port_kstats/',
                model)
 # #
 # # #extr ts
@@ -31,6 +31,8 @@ es = Estimationset('/mnt/SAT4/DATA/S1_EODC/', ['E048N015T1'],
 #es.ssm_ts(4814464, 1512364, 10)
 #p3
 #es.ssm_ts(4814518, 1512426, 10)
-es.ssm_map('D20150704_170644')
+#es.ssm_map('D20150704_170644')
 #e051n015
 #es.ssm_map('D20150718_165032')
+es.ssm_map('D20160513_182732')
+es.ssm_ts(3233879, 1474155, 10)

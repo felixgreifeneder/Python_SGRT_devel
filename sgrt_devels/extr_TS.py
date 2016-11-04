@@ -70,7 +70,8 @@ def extr_ERA_SMC(path, lon, lat):
 
 
 # extract time series of SIG0 and LIA from SGRT database
-def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, lat, xdim, ydim, pol_name=None, grid=None, hour=None):
+def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, lat, xdim, ydim,
+                     pol_name=None, grid=None, hour=None, sat_pass=None, monthmask=None):
     #initialise grid
     alpGrid = Equi7.Equi7Grid(src_res)
 
@@ -87,6 +88,10 @@ def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, 
     # extract data
     x = int((Equi7XY[1] - TileExtent[0]) / src_res)
     y = int((TileExtent[3] - Equi7XY[2]) / src_res)
+
+    # check if month mask is set
+    if monthmask is None:
+        monthmask = [6, 7, 8, 9]
 
     #extract data
     if pol_name is None:
@@ -118,9 +123,11 @@ def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, 
         LIA = (days, data)
 
     elif len(pol_name) == 2:
-        SIG0 = TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim, pol_name=pol_name[0].upper())
-        SIG02 = TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim, pol_name=pol_name[1].upper())
-        LIA = TOI.read_ts("LIA__", x, y, xsize=xdim, ysize=ydim)
+        SIG0 = TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim,
+                           pol_name=pol_name[0].upper(), sat_pass=sat_pass)
+        SIG02 = TOI.read_ts("SIG0_", x, y, xsize=xdim, ysize=ydim,
+                            pol_name=pol_name[1].upper(), sat_pass=sat_pass)
+        LIA = TOI.read_ts("LIA__", x, y, xsize=xdim, ysize=ydim, sat_pass=sat_pass)
 
         # this is temporary: filter scenes based on time, TODO: change or remove
         if hour is not None:
@@ -131,6 +138,14 @@ def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, 
             morning = np.where(np.array([LIA[0][i].hour for i in range(len(LIA[0]))]) == hour)[0]
             LIA = (np.array(LIA[0])[morning], LIA[1][morning])
 
+        # filter months
+        # TODO make an option
+        summer = np.where(np.in1d(np.array([SIG0[0][i].month for i in range(len(SIG0[0]))]), monthmask))[0]
+        SIG0 = (np.array(SIG0[0])[summer], SIG0[1][summer])
+        summer = np.where(np.in1d(np.array([SIG02[0][i].month for i in range(len(SIG02[0]))]), monthmask))[0]
+        SIG02 = (np.array(SIG02[0])[summer], SIG02[1][summer])
+        summer = np.where(np.in1d(np.array([LIA[0][i].month for i in range(len(LIA[0]))]), monthmask))[0]
+        LIA = (np.array(LIA[0])[summer], LIA[1][summer])
 
         # check if date dublicates exist
         udates = np.unique(SIG0[0], return_index=True)
