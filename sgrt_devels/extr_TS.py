@@ -71,7 +71,7 @@ def extr_ERA_SMC(path, lon, lat):
 
 # extract time series of SIG0 and LIA from SGRT database
 def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, lat, xdim, ydim,
-                     pol_name=None, grid=None, hour=None, sat_pass=None, monthmask=None):
+                     pol_name=None, grid=None, subgrid='EU', hour=None, sat_pass=None, monthmask=None):
     #initialise grid
     alpGrid = Equi7.Equi7Grid(src_res)
 
@@ -79,7 +79,7 @@ def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, 
     if grid is None:
         Equi7XY = alpGrid.lonlat2equi7xy(lon, lat)
     elif grid == 'Equi7':
-        Equi7XY = ['EU', lon, lat]
+        Equi7XY = [subgrid, lon, lat]
     TileName = alpGrid.identfy_tile(Equi7XY[0], [Equi7XY[1],Equi7XY[2]])
     TileExtent = Equi7.Equi7Tile(TileName).extent
     #load tile
@@ -91,7 +91,7 @@ def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, 
 
     # check if month mask is set
     if monthmask is None:
-        monthmask = [6, 7, 8, 9]
+        monthmask = [1,2,3,4,5,6, 7, 8, 9,10,11,12]
 
     #extract data
     if pol_name is None:
@@ -148,15 +148,19 @@ def extr_SIG0_LIA_ts(dir_root, product_id, soft_id, product_name, src_res, lon, 
         LIA = (np.array(LIA[0])[summer], LIA[1][summer])
 
         # check if date dublicates exist
-        udates = np.unique(SIG0[0], return_index=True)
+        # TODO average if two measurements in one day
+        datedate = [SIG0[0][i].date() for i in range(len(SIG0[0]))]
+        udates = np.unique(datedate, return_index=True)
         days = np.array(SIG0[0])[udates[1]]
         data = np.array(SIG0[1])[udates[1],:,:]
         SIG0 = (days, data)
-        udates = np.unique(SIG02[0], return_index=True)
+        datedate = [SIG02[0][i].date() for i in range(len(SIG02[0]))]
+        udates = np.unique(datedate, return_index=True)
         days = np.array(SIG02[0])[udates[1]]
         data = np.array(SIG02[1])[udates[1],:,:]
         SIG02 = (days, data)
-        udates = np.unique(LIA[0], return_index=True)
+        datedate = [LIA[0][i].date() for i in range(len(LIA[0]))]
+        udates = np.unique(datedate, return_index=True)
         days = np.array(LIA[0])[udates[1]]
         data = np.array(LIA[1])[udates[1],:,:]
         LIA = (days, data)
