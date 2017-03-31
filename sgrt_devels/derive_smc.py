@@ -4,7 +4,7 @@ from sgrt_devels.compile_tset import Estimationset
 import sgrt.common.grids.Equi7Grid as Equi7
 import pickle
 
-def extract_time_series(model_path, sgrt_root, out_path, lat, lon, grid):
+def extract_time_series(model_path, sgrt_root, out_path, lat, lon, grid, name=None):
 
     mlmodel = pickle.load(open(model_path, 'rb'))
 
@@ -23,6 +23,8 @@ def extract_time_series(model_path, sgrt_root, out_path, lat, lon, grid):
                        sgrt_root+'Sentinel-1_CSAR/IWGRDH/parameters/datasets/sig0m/B0212/EQUI7_EU010M/',
                        sgrt_root+'Sentinel-1_CSAR/IWGRDH/ancillary/datasets/DEM/',
                        out_path,
-                       mlmodel)
+                       mlmodel,
+                       subgrid='EU',
+                       uselc=True)
 
-    es.ssm_ts(Equi7XY[1], Equi7XY[2], 10)
+    es.ssm_ts_alternative(Equi7XY[1], Equi7XY[2], 3, name=name)

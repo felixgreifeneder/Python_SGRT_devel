@@ -97,3 +97,25 @@ def scihub2list(inpath, outpath):
     #with open(outpath, "wb") as f:
     #    writer = csv.writer(f, quoting=csv.QUOTE_NONE, lineterminator='\n', delimiter=',')
     #    writer.writerow(filelist)
+
+def findprocessedfiles(inpath, outpath):
+    # read original
+    with open(inpath, "rb") as f:
+        reader = csv.reader(f)
+        filelist_old = list(reader)
+
+    filelist_new = []
+    for fname in filelist_old:
+        fbname = os.path.basename(fname[0])
+        fbexists = sgrt.common.recursive_filesearch.search_file('/mnt/SAT4/DATA/S1_EODC/Sentinel-1_CSAR/IWGRDH/preprocessed/datasets/resampled/A0111/EQUI7_EU010M/E048N015T1/',
+                                                                'D' + fbname[17:25] + '_' + fbname[26:32] + '*')
+
+        if len(fbexists) != 0:
+            print(fbname + ' already processed')
+        else:
+            filelist_new.append(fname)
+
+    f = open(outpath, "wb")
+    for x in filelist_new: f.write(x[0] + '\n')
+    # f.writelines(filelist)
+    f.close()
